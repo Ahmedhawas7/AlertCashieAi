@@ -31,7 +31,7 @@ export class GitHubWatcher {
     private async pollCommits(repo: string) {
         const url = `https://api.github.com/repos/${this.org}/${repo}/commits?per_page=5`;
         const response = await fetch(url, {
-            headers: { 'User-Agent': 'AlertCashie-Bot' }
+            headers: { 'User-Agent': 'AlertAi-Bot' }
         });
 
         if (response.status !== 200) return;
@@ -65,7 +65,7 @@ export class GitHubWatcher {
     private async pollReleases(repo: string) {
         const url = `https://api.github.com/repos/${this.org}/${repo}/releases/latest`;
         const response = await fetch(url, {
-            headers: { 'User-Agent': 'AlertCashie-Bot' }
+            headers: { 'User-Agent': 'AlertAi-Bot' }
         });
 
         if (response.status !== 200) return;

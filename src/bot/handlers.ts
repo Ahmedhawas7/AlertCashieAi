@@ -37,7 +37,7 @@ export function setupHandlers(
         const mode = await storage.getConfig('alert_mode') || 'loud';
         const paused = (await storage.getConfig('watchers_paused')) === 'true';
 
-        let message = `🩺 *AlertCashie Health Status*\n\n`;
+        let message = `🩺 *AlertAi Health Status*\n\n`;
         message += `📊 *Stats:*\n`;
         message += `- Events Tracking: ${stats.eventCount}\n`;
         message += `- Active Users: ${stats.userCount}\n`;

@@ -53,7 +53,8 @@ export class HealthServer {
                     <head><title>CARV Ecosystem Intelligence Agent</title></head>
                     <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #0f172a; color: #f8fafc;">
                         <div style="text-align: center; border: 1px solid #334155; padding: 2rem; border-radius: 1rem; background: #1e293b; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);">
-                            <h1 style="color: #38bdf8; margin: 0;">AlertCashie</h1>
+                            <h1 style="color: #38bdf8; margin: 0;">AlertAi</h1>
+                            <p style="color: #94a3b8; margin: 5px 0 20px;">Orchestrating Ecosystem Intelligence</p>
                             <p style="margin: 1rem 0;">Ecosystem Intelligence Agent is active.</p>
                             <div style="display: flex; gap: 10px; justify-content: center; margin-bottom: 20px;">
                                 <a href="/dashboard" style="color: #38bdf8; text-decoration: none; border: 1px solid #334155; padding: 5px 15px; border-radius: 5px;">Dashboard</a>
@@ -176,7 +177,7 @@ export class HealthServer {
 
         this.app.get('/metrics', async (req, res) => {
             const stats = await this.storage.getStats();
-            let metrics = `# AlertCashie Metrics\n`;
+            let metrics = `# AlertAi Metrics\n`;
             metrics += `bot_uptime_seconds ${Math.floor((Date.now() - this.startTime) / 1000)}\n`;
             metrics += `events_total ${stats.eventCount}\n`;
             metrics += `insights_total ${stats.insightCount}\n`;

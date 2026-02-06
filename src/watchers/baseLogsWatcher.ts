@@ -13,12 +13,14 @@ export class BaseLogsWatcher {
     private pauseUntil = 0;
     private recentEvents: number[] = [];
     public lastSuccess = 0;
+    private targetChatId?: string;
 
-    constructor(bot: Telegraf, rpc: RPCService, storage: StorageService, contracts: string[]) {
+    constructor(bot: Telegraf, rpc: RPCService, storage: StorageService, contracts: string[], targetChatId?: string) {
         this.bot = bot;
         this.rpc = rpc;
         this.storage = storage;
         this.contracts = contracts;
+        this.targetChatId = targetChatId;
     }
 
     async poll() {
@@ -127,6 +129,16 @@ export class BaseLogsWatcher {
         const mode = await this.storage.getConfig('alert_mode');
         if (mode === 'silent') return;
 
+        // If running in GitHub Actions Runner mode (One-Shot), send to target only.
+        if (this.targetChatId) {
+            try {
+                await this.bot.telegram.sendMessage(this.targetChatId, MessageFormatter.formatEvent(event), { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } } as any);
+            } catch (e) {
+                console.error(`Failed to send alert to target ${this.targetChatId}`, e);
+            }
+            return;
+        }
+
         const users = await this.storage.getAllUsers();
         // For MVP, maybe just send to admin IDs from env or rely on handlers knowing users?
         // Since handlers.ts has ctx, here we need direct telegram access.
@@ -137,7 +149,7 @@ export class BaseLogsWatcher {
             try {
                 // Determine if we should send based on focus?
                 // For now send everything if loud.
-                await this.bot.telegram.sendMessage(user.telegramId, MessageFormatter.formatEvent(event), { parse_mode: 'Markdown', link_preview: { is_disabled: true } } as any);
+                await this.bot.telegram.sendMessage(user.telegramId, MessageFormatter.formatEvent(event), { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } } as any);
             } catch (e) {
                 // Ignore blocked users
             }

@@ -41,6 +41,7 @@ async function bootstrap() {
     setupHandlers(bot, storage, ai, memory, search, summaries, backup, scheduler);
 
     const mediumWatcher = new MediumWatcher(
+        bot,
         storage,
         process.env.MEDIUM_RSS_URL || 'https://medium.com/feed/@carv_official'
     );
@@ -55,6 +56,7 @@ async function bootstrap() {
             '0x1fab4B4B691a86bb16c296cC06E8cf0c12695B8E', // Protocol Service
             '0xa91fF8b606BA57D8c6638Dd8CF3FC7eB15a9c634', // Proxy
         ]
+        // targetChatId is undefined in bot mode (broadcasts to all users)
     );
 
     const reminder = new ReminderService(bot, (process.env.TELEGRAM_ADMIN_IDS || '').split(',')[0]);

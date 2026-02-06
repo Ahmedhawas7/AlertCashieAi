@@ -1,17 +1,24 @@
 import Parser from 'rss-parser';
 import { StorageService } from '../services/storage';
 
+import { Telegraf } from 'telegraf';
+import { MessageFormatter } from '../services/formatter';
+
 export class MediumWatcher {
     private parser: Parser;
     private storage: StorageService;
+    private bot: Telegraf;
     private rssUrl: string;
     private consecutiveErrors = 0;
     private pauseUntil = 0;
+    private targetChatId?: string;
 
-    constructor(storage: StorageService, rssUrl: string) {
+    constructor(bot: Telegraf, storage: StorageService, rssUrl: string, targetChatId?: string) {
+        this.bot = bot;
         this.parser = new Parser();
         this.storage = storage;
         this.rssUrl = rssUrl;
+        this.targetChatId = targetChatId;
     }
 
     async poll() {
@@ -63,9 +70,9 @@ export class MediumWatcher {
             const type = EventClassifier.classify(item.title || '', item.contentSnippet || '');
             const emoji = EventClassifier.getEmoji(type);
 
-            await this.storage.saveEvent({
+            const saved = await this.storage.saveEvent({
                 source: 'Medium',
-                type, // <- ده EventType اللي طالع من EventClassifier
+                type, // <- EventType
                 severity: 'info',
                 title: `${emoji} ${item.title || 'New CARV Announcement'}`,
                 summary: item.contentSnippet?.slice(0, 220) || '',
@@ -79,6 +86,30 @@ export class MediumWatcher {
                 rawRef: item.guid ?? item.link ?? `${item.title ?? 'medium'}_${item.isoDate ?? Date.now()}`
             });
 
+            await this.sendAlert(saved);
+        }
+    }
+
+    private async sendAlert(event: any) {
+        const mode = await this.storage.getConfig('alert_mode');
+        if (mode === 'silent') return;
+
+        if (this.targetChatId) {
+            try {
+                await this.bot.telegram.sendMessage(this.targetChatId, MessageFormatter.formatEvent(event), { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } } as any);
+            } catch (e) {
+                console.error(`Failed to send alert to target ${this.targetChatId}`, e);
+            }
+            return;
+        }
+
+        const users = await this.storage.getAllUsers();
+        for (const user of users) {
+            try {
+                await this.bot.telegram.sendMessage(user.telegramId, MessageFormatter.formatEvent(event), { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } } as any);
+            } catch (e) {
+                // Ignore blocked users
+            }
         }
     }
 }

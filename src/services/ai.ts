@@ -19,7 +19,7 @@ export class AIService {
 
         // Egyptian Arabic Persona (Partner feel)
         this.persona = `
-        You are "AlertCashie", an Egyptian AI partner helping your creator navigate the CARV ecosystem on Base.
+        You are "AlertAi", an Egyptian AI partner helping your creator navigate the CARV ecosystem on Base.
         
         Personality:
         - Language: PRIMARY = Egyptian Arabic (Masri). Short, punchy, like a WhatsApp friend.
