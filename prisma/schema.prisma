@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Event {
+  id              Int      @id @default(autoincrement())
+  source          String   // Base, Medium, GitHub, etc.
+  type            String   // Announcement, TokenMovement, etc.
+  severity        String   @default("info") // info, medium, high, critical
+  title           String
+  summary         String
+  details         String?
+  sourceUrl       String?
+  timestamp       DateTime @default(now())
+  tags            String?  // JSON string array
+  entities        String?  // JSON object strings {contracts[], wallets[], txHash?}
+  rawRef          String?  @unique // unique identifier to prevent duplicates
+}
+
+model Insight {
+  id          Int      @id @default(autoincrement())
+  type        String   // Pattern, Whale, Campaign
+  title       String
+  content     String
+  score       Float    @default(0)
+  timestamp   DateTime @default(now())
+}
+
+model Prediction {
+  id              Int      @id @default(autoincrement())
+  title           String
+  description     String
+  probability     Float
+  rationale       String
+  targetDate      DateTime
+  status          String   @default("PENDING") // PENDING, CONFIRMED, FAILED
+  actualOutcome   String?
+  evaluationDate  DateTime?
+  timestamp       DateTime @default(now())
+}
+
+model WatcherState {
+  id        String   @id // e.g., "base_logs", "medium_rss", "github"
+  lastBlock Int?
+  lastSeen  String?  // last seen RSS guid, timestamp, or SHA
+}
+
+model User {
+  telegramId  String  @id
+  carvId      String?
+  evmAddress  String?
+  isAdmin     Boolean @default(false)
+}
+
+model Config {
+  key   String @id
+  value String
+}
+
+model Label {
+  address String @id // Checksummed/Lowercase address
+  name    String
+}
+
+model DailyStats {
+  date               String @id // YYYY-MM-DD
+  aiCalls            Int    @default(0)
+  predictionAccuracy Float  @default(0)
+}
+
+model ErrorLog {
+  id        Int      @id @default(autoincrement())
+  message   String
+  stack     String?
+  timestamp DateTime @default(now())
+}

@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+data/dev.db
+data/dev.db-journal
+.DS_Store
+coverage
+.vscode
