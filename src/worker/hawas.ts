@@ -46,73 +46,120 @@ export class HawasBrain {
         if (!text) return null;
 
         const chatId = msg.chat.id;
+        const userId = msg.from?.id;
+        if (!userId) return null; // Should not happen
+
         const senderName = msg.from?.first_name || 'يا صديقي';
         const isPrivate = msg.chat.type === 'private';
+        const isAdmin = this.env.TELEGRAM_ADMIN_IDS.includes(String(userId));
+
+        // --- 0. Update User State (Lang, Interaction Time) ---
+        // Fetch user to check cooldown
+        const userState = await this.db.getUser(userId);
 
         // --- 1. Admin Commands ---
         if (text.startsWith('/')) {
-            return this.handleCommand(text, msg);
+            return this.handleCommand(text, msg, isAdmin);
         }
 
-        // --- 2. Auto-Reply Check (Group) ---
+        // --- 2. Check Auto-Reply (Group) ---
         if (!isPrivate) {
             const settings = await this.db.getGroupSettings(chatId);
             const mode = settings?.mode || this.env.DEFAULT_GROUP_MODE || 'chatty';
 
             const isMentioned = text.toLowerCase().includes('hawas') || text.includes('حواس');
-            const isReplyToBot = msg.reply_to_message?.from?.is_bot === true; // Assuming we are the bot
-            // Strictly check bot username if possible, but for simplicity assuming is_bot is us if replying
-
+            const isReplyToBot = msg.reply_to_message?.from?.is_bot === true;
             const hasQuestionMark = text.includes('?') || text.includes('؟');
 
             let shouldReply = false;
             if (isMentioned || isReplyToBot) shouldReply = true;
             else if (mode === 'chatty' && hasQuestionMark) shouldReply = true;
 
-            if (!shouldReply) return null;
+            if (!shouldReply) {
+                // If correction check, always create a "hearing" capability?
+                // Correction usually implies replying to the bot.
+                // Let's perform correction check even if no direct reply if it starts with pattern.
+                if (text.startsWith('تصحيح:') || text.startsWith('الصح:')) {
+                    return this.handleCorrection(text, msg, senderName);
+                }
+                return null;
+            }
         }
 
-        // --- 3. Knowledge Retrieval ---
+        // --- 3. Anti-Spam (User Cooldown) ---
+        if (!isAdmin && userState?.lastInteractedAt) {
+            const lastTime = new Date(userState.lastInteractedAt).getTime();
+            const now = Date.now();
+            if (now - lastTime < 45 * 1000) {
+                // Determine if we should warn or ignore. To avoid spamming warnings, just ignore or react with emoji if possible.
+                // But wrapper logic expects text. Let's ignore to strictly stop spam.
+                // Or reply privately? In group, ignoring is best.
+                console.log(`Spam cooldown for user ${userId}`);
+                return null;
+            }
+        }
+
+        // Update interaction time
+        await this.db.updateUser(userId, { lastInteractedAt: new Date().toISOString(), first_name: senderName });
+
+        // --- 4. Correction Flow ---
+        if (text.startsWith('تصحيح:') || text.startsWith('الصح:')) {
+            return this.handleCorrection(text, msg, senderName);
+        }
+
+        // --- 5. Knowledge Retrieval ---
         // Basic normalization
         const query = text.replace(/حواس|Hawas/gi, '').trim();
         if (query.length < 2) return "أيوة يا غالي؟ سامعك.";
 
         const knowledge = await this.db.searchKnowledge(query);
         if (knowledge) {
-            // Return cached answer directly
-            // Optimization: If the answer is raw text, wrap it? 
-            // Or assume saved answers are already formatted or just simple facts.
-            // For Hawas persona, let's wrap simple facts in a mini-template or just reply.
             return `🔻 ${senderName}...\n${knowledge.answer}`;
         }
 
-        // --- 4. Fallback: AI or "Teach Me" ---
-        const aiEnabled = this.env.AI_ENABLED_DEFAULT === 'true'; // Or check DB config
+        // --- 6. Fallback: AI or "Teach Me" ---
+        const aiEnabled = this.env.AI_ENABLED_DEFAULT === 'true';
 
         if (!aiEnabled) {
             return `معلش يا ${senderName}، أنا لسه متعلمتش إجابة السؤال ده.\nممكن تعلمني؟ اكتب: \n/teach ${query} | الإجابة`;
         }
 
-        // AI Logic would go here (fetch Gemini)
-        // For this implementation, we return a placebo if AI is "on" but no key provided, 
-        // or actually call it if implemented. 
-        // User requested "Optional AI usage", let's stub it or implement basic fetch if key exists.
-
         return `(AI Placeholder) ببحث في الموضوع ده...`;
     }
 
-    async handleCommand(text: string, msg: TelegramMessage): Promise<string | null> {
-        const parts = text.split(' ');
-        const limitCmd = parts[0].toLowerCase();
-        const args = parts.slice(1).join(' ');
-        const isAdmin = this.env.TELEGRAM_ADMIN_IDS.includes(String(msg.from?.id));
+    async handleCorrection(text: string, msg: TelegramMessage, senderName: string): Promise<string> {
+        // Extract correction
+        const correction = text.replace(/^(تصحيح:|الصح:)/, '').trim();
+        if (correction.length < 5) return "التصحيح قصير أوي يا غالي.";
 
-        switch (limitCmd) {
+        // If reply, get original context
+        let originalText = msg.reply_to_message?.text;
+        if (!originalText) originalText = "Context lost";
+
+        // Save tentative knowledge
+        // We assume the user is correcting the LAST answer or specific logic.
+        // For simplicity, save as: Q: [Correction from X on Y] A: [Correction]
+        await this.db.saveKnowledge(
+            `Correction by ${senderName}: ${originalText.slice(0, 50)}...`,
+            correction,
+            true // isTentative
+        );
+
+        return `✅ تسلم يا ${senderName}. سجلت التصحيح للمراجعة.`;
+    }
+
+    async handleCommand(text: string, msg: TelegramMessage, isAdmin: boolean): Promise<string | null> {
+        const parts = text.split(' ');
+        const limitCmd = parts[0].toLowerCase(); // e.g., /teach@botname
+        const cmd = limitCmd.split('@')[0];
+        const args = parts.slice(1).join(' ');
+
+        switch (cmd) {
             case '/start':
                 return HawasFormatter.formatWelcome();
 
             case '/teach':
-                if (!isAdmin) return "🚫 الأمر ده للأدمن بس يا كبير.";
+                if (!isAdmin) return "🚫 للأدمن بس يا كبير.";
                 if (!args.includes('|')) return "⚠️ الصيغة غلط. اكتب:\n/teach السؤال | الإجابة";
                 const [q, a] = args.split('|').map(s => s.trim());
                 await this.db.saveKnowledge(q, a);
@@ -126,15 +173,13 @@ export class HawasBrain {
 
             case '/autolearn':
                 if (!isAdmin) return "🚫 للأدمن بس.";
-                if (!['on', 'off'].includes(args)) return "استخدم: /autolearn on أو /autolearn off";
-                // We'll store this in Config or GroupSettings? 
-                // Global setting usually. Let's use Config table if available, but for now GroupSettings or Env.
-                // Assuming global config for simplicity.
-                // Since Config table exists in schema:
-                // await this.db.setConfig('ai_enabled', args === 'on' ? 'true' : 'false');
-                // But DB helper needs setConfig. Let's add it or just mock it for now as "Not implemented fully in DB helper yet"
-                // Actually, let's keep it simple and just say:
-                return `✅ تم تغيير التعلم الآلي لـ: ${args} (محاكاة)`;
+                return `✅ تم تغيير وضع التعلم (محاكاة).`;
+
+            case '/lang':
+                const lang = args.trim().toLowerCase();
+                if (!['ar', 'en'].includes(lang)) return "Choose: /lang ar or /lang en";
+                await this.db.updateUser(msg.from?.id!, { lang });
+                return lang === 'ar' ? "✅ تمام، هكلمك مصري." : "✅ Done, I'll speak English with you private.";
 
             default:
                 return null;

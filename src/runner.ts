@@ -4,6 +4,7 @@ import { StorageService } from './services/storage';
 import { RPCService } from './services/rpc';
 import { MediumWatcher } from './watchers/mediumWatcher';
 import { BaseLogsWatcher } from './watchers/baseLogsWatcher';
+import { DigestService } from './services/digest';
 
 dotenv.config();
 
@@ -62,10 +63,14 @@ async function run() {
             targetChatId
         );
 
+        // Digest Service
+        const digest = new DigestService(storage, bot, targetChatId);
+
         // Run polling in parallel (One-Shot)
         await Promise.all([
             mediumWatcher.poll(),
-            baseWatcher.poll()
+            baseWatcher.poll(),
+            digest.runCycles()
         ]);
 
         console.log('✅ AlertAi online cycle completed successfully');
