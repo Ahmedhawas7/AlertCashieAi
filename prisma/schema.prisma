@@ -55,6 +55,26 @@ model User {
   carvId      String?
   evmAddress  String?
   isAdmin     Boolean @default(false)
+  lang        String  @default("ar") // 'ar' (Egyptian) or 'en'
+}
+
+model GroupSettings {
+  chatId      String  @id
+  mode        String  @default("chatty") // 'quiet', 'chatty'
+  lang        String  @default("ar")
+}
+
+model Knowledge {
+  id          Int      @id @default(autoincrement())
+  question    String
+  answer      String
+  tags        String? // JSON array
+  confidence  Float    @default(1.0)
+  isTentative Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([question])
 }
 
 model Config {

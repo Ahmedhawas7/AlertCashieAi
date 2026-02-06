@@ -1,0 +1,16 @@
+name = "hawas-worker"
+main = "src/worker/index.ts"
+compatibility_date = "2023-10-30"
+
+[vars]
+# Default variables (will be overridden by secrets in dashboard)
+DEFAULT_GROUP_MODE = "chatty"
+DEFAULT_GROUP_LANG = "ar"
+AI_ENABLED_DEFAULT = "false"
+
+# Do not commit secrets here!
+# Add them via `wrangler secret put <NAME>`
+# BOT_TOKEN
+# DATABASE_URL (Supabase URL)
+# SUPABASE_KEY (Supabase Anon/Service Role Key)
+# GEMINI_API_KEY
