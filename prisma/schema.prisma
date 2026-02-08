@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model Event {
@@ -99,4 +99,42 @@ model ErrorLog {
   message   String
   stack     String?
   timestamp DateTime @default(now())
+}
+
+// --- New Agent Tables ---
+
+model Job {
+  id        Int      @id @default(autoincrement())
+  type      String   // 'digest', 'checkUrl', 'skill'
+  cron      String?  // Cron expression
+  data      String?  // JSON params
+  lastRun   DateTime?
+  nextRun   DateTime?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Approval {
+  token     String   @id
+  userId    String
+  action    String
+  details   String?
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED, EXPIRED
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model SkillRegistry {
+  name        String @id
+  description String
+  enabled     Boolean @default(true)
+  config      String? // JSON config
+}
+
+model MemoryFragment {
+  id        Int      @id @default(autoincrement())
+  category  String
+  content   String
+  timestamp DateTime @default(now())
+  // embedding Bytes? // For future vector usage
 }

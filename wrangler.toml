@@ -2,15 +2,31 @@ name = "hawas-worker"
 main = "src/worker/index.ts"
 compatibility_date = "2023-10-30"
 
+# D1 Database Binding
+[[d1_databases]]
+binding = "hawas_db"
+database_name = "hawas-db"
+database_id = "99fe7a34-6c23-4757-b307-76abc65e5310"
+
+# Cron Trigger for Daily Digest
+[triggers]
+crons = ["0 9 * * *"]  # Daily at 09:00 Africa/Cairo
+
 [vars]
-# Default variables (will be overridden by secrets in dashboard)
+# Default variables
 DEFAULT_GROUP_MODE = "chatty"
 DEFAULT_GROUP_LANG = "ar"
 AI_ENABLED_DEFAULT = "false"
 
-# Do not commit secrets here!
-# Add them via `wrangler secret put <NAME>`
+# CARV OAuth Configuration
+OWNER_TELEGRAM_ID = "YOUR_TELEGRAM_USER_ID"  # Replace with your Telegram user ID
+CARV_REDIRECT_URL = "https://your-worker.workers.dev/auth/carv/callback"  # Update with your worker URL
+
+# Secrets (add via `wrangler secret put <NAME>`)
 # BOT_TOKEN
 # DATABASE_URL (Supabase URL)
 # SUPABASE_KEY (Supabase Anon/Service Role Key)
 # GEMINI_API_KEY
+# CARV_CLIENT_ID
+# CARV_CLIENT_SECRET
+# ENCRYPTION_SECRET (32-byte hex string for AES-256-GCM)

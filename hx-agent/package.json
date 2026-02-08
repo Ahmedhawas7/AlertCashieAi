@@ -1,0 +1,31 @@
+{
+    "name": "hx-agent",
+    "version": "1.0.0",
+    "description": "HX Agent - Always-on Telegram Assistant",
+    "main": "src/index.js",
+    "scripts": {
+        "start": "node src/index.js",
+        "dev": "nodemon src/index.js",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [
+        "telegram",
+        "agent",
+        "ai",
+        "supabase"
+    ],
+    "author": "Ahmed Hawas",
+    "license": "ISC",
+    "dependencies": {
+        "@supabase/supabase-js": "^2.39.0",
+        "dotenv": "^16.3.1",
+        "node-cron": "^3.0.3",
+        "openai": "^4.20.1",
+        "telegraf": "^4.15.3",
+        "winston": "^3.11.0",
+        "zod": "^3.22.4"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
+    }
+}

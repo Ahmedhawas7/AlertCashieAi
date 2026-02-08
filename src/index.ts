@@ -13,22 +13,29 @@ import { MemorySearch } from './memory/memorySearch';
 import { MemorySummaries } from './memory/memorySummaries';
 import { HealthServer } from './server';
 import { BackupService } from './services/backup';
-import { DailyDigestScheduler } from './scheduler/dailyDigest';
+import { SchedulerService } from './scheduler';
+import { Agent } from './brain/agent';
+import { SkillLoader } from './skills/loader';
 
 dotenv.config();
 
 async function bootstrap() {
-    console.log('🚀 Starting Proactive Cashie Watcher Bot...');
+    console.log('🚀 Starting HX Super Agent...');
 
     const storage = new StorageService();
     const rpc = new RPCService(process.env.BASE_RPC_URL || 'https://mainnet.base.org');
     const bot = new Telegraf(process.env.BOT_TOKEN!);
+    // Pass API key if using Gemini default, otherwise AI Service picks up env types
     const ai = new AIService(process.env.GEMINI_API_KEY, storage);
 
-    // Initialize AI (load settings)
+    // Initialize AI
     await ai.init();
 
-    // memU-style Memory
+    // Skills & Brain
+    const skillLoader = new SkillLoader();
+    const agent = new Agent(ai, storage, skillLoader);
+
+    // Memory
     const memory = new MemoryStore();
     const search = new MemorySearch(memory);
     const summaries = new MemorySummaries(storage, memory);
@@ -36,10 +43,13 @@ async function bootstrap() {
     // Infrastructure
     const server = new HealthServer(storage);
     const backup = new BackupService(bot, storage);
-    const scheduler = new DailyDigestScheduler(bot, storage, memory);
+    const scheduler = new SchedulerService(bot, storage, memory);
 
-    setupHandlers(bot, storage, ai, memory, search, summaries, backup, scheduler);
+    // Setup Handlers (Injected)
+    // We pass scheduler as 'any' or refactor handlers to accept SchedulerService
+    setupHandlers(bot, storage, ai, memory, skillLoader, agent);
 
+    // Watchers
     const mediumWatcher = new MediumWatcher(
         bot,
         storage,
@@ -52,84 +62,34 @@ async function bootstrap() {
         storage,
         [
             '0xc08Cd26474722cE93F4D0c34D16201461c10AA8C', // CARV token
-            '0x584cB7Dae5158be594AA1022Fb38017C791af2A0', // veCARV Airdrop
-            '0x1fab4B4B691a86bb16c296cC06E8cf0c12695B8E', // Protocol Service
-            '0xa91fF8b606BA57D8c6638Dd8CF3FC7eB15a9c634', // Proxy
         ]
-        // targetChatId is undefined in bot mode (broadcasts to all users)
     );
 
     const reminder = new ReminderService(bot, (process.env.TELEGRAM_ADMIN_IDS || '').split(',')[0]);
     reminder.startPeriodicCheckIn();
 
-    // Start Core Services
+    // Start Services
     server.start();
     scheduler.start();
 
-    // Initial Insight Generation
-    summaries.generateInsights().catch(e => console.error('Initial insights failed:', e));
-
-    // Polling loops
+    // Polling Logic
     const interval = (parseInt(process.env.POLL_INTERVAL_SECONDS || '60')) * 1000;
-    let lastWatcherSuccess = Date.now();
-
-    // Watchdog
-    setInterval(() => {
-        if (Date.now() - lastWatcherSuccess > 10 * 60 * 1000) {
-            console.error('🚨 Watchdog: No successful cycle for 10m. Exiting.');
-            process.exit(1);
-        }
-    }, 60000);
 
     setInterval(async () => {
         try {
-            const start = Date.now();
             await mediumWatcher.poll();
-            const rpcStart = Date.now();
             await baseWatcher.poll();
-            const rpcEnd = Date.now();
-
-            lastWatcherSuccess = Date.now();
-
-            await summaries.generateInsights();
-
-            // Update Health Server Metrics
-            const rpcState = await storage.getWatcherState('base_logs');
-            const mediumState = await storage.getWatcherState('medium_rss');
-            server.setMetrics({
-                lastBlock: rpcState?.lastBlock || undefined,
-                lastRssGuid: mediumState?.lastSeen || undefined,
-                rpcLatencyMs: rpcEnd - rpcStart
-            });
-
         } catch (e) {
-            await storage.logError('Polling loop error', (e as any).stack);
+            console.error('Polling Error', e);
         }
     }, interval);
 
     bot.launch();
-    console.log('✅ Bot is online and proactive.');
+    console.log('✅ HX Agent is online.');
 
-    // Global Error Handling
-    process.on('unhandledRejection', (reason, promise) => {
-        storage.logError(`Unhandled Rejection`, String(reason));
-    });
-
-    process.on('uncaughtException', (error) => {
-        storage.logError(`Uncaught Exception`, error.stack).then(() => {
-            process.exit(1); // Force restart by host
-        });
-    });
-
-    // Enable graceful stop
-    process.once('SIGINT', () => {
-        bot.stop('SIGINT');
-        process.exit(0);
-    });
-    process.once('SIGTERM', () => {
-        bot.stop('SIGTERM');
-        process.exit(0);
-    });
+    // Graceful Stop
+    process.once('SIGINT', () => { bot.stop('SIGINT'); process.exit(0); });
+    process.once('SIGTERM', () => { bot.stop('SIGTERM'); process.exit(0); });
 }
 
 bootstrap().catch(console.error);

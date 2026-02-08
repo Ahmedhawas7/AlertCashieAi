@@ -185,4 +185,19 @@ export class StorageService {
             data
         });
     }
+
+    // --- Jobs ---
+
+    async getJobs() {
+        return await this.prisma.job.findMany({
+            where: { active: true }
+        });
+    }
+
+    async updateJob(id: number, data: any) {
+        return await this.prisma.job.update({
+            where: { id },
+            data
+        });
+    }
 }
