@@ -2,46 +2,49 @@ import { Env } from '../types';
 import { encrypt, decrypt } from './crypto';
 
 export interface CarvConnection {
-    id: number;
-    telegram_id: number;
-    carv_id: string;
-    wallet_address: string | null;
-    email: string | null;
+    telegram_user_id: string;
+    smart_wallet_address: string | null;
+    signer_wallet_address: string | null;
+    email_address: string | null;
+    access_token_enc: string | null;
+    refresh_token_enc: string | null;
+    token_expires_at: number | null;
+    scope: string | null;
     linked_at: number;
 }
 
 /**
  * Save pending OAuth session
+ * state TEXT PRIMARY KEY, telegram_user_id TEXT, created_at INTEGER, expires_at INTEGER
  */
 export async function savePendingSession(
     db: D1Database,
-    telegramId: number,
+    telegramUserId: string,
     state: string,
     expiresAt: number
 ): Promise<void> {
     await db.prepare(`
-        INSERT INTO pending_connect_sessions (telegram_id, state, created_at, expires_at)
+        INSERT INTO pending_connect_sessions (state, telegram_user_id, created_at, expires_at)
         VALUES (?, ?, ?, ?)
-    `).bind(telegramId, state, Date.now(), expiresAt).run();
+    `).bind(state, telegramUserId, Date.now(), expiresAt).run();
 }
 
 /**
- * Validate state and return telegram_id if valid
+ * Validate state and return telegram_user_id if valid
  */
 export async function validateState(
     db: D1Database,
     state: string
-): Promise<number | null> {
+): Promise<string | null> {
     const result = await db.prepare(`
-        SELECT telegram_id, expires_at FROM pending_connect_sessions
+        SELECT telegram_user_id, expires_at FROM pending_connect_sessions
         WHERE state = ?
-    `).bind(state).first<{ telegram_id: number, expires_at: number }>();
+    `).bind(state).first<{ telegram_user_id: string, expires_at: number }>();
 
     if (!result) return null;
 
     // Check expiration
     if (Date.now() > result.expires_at) {
-        // Clean up expired session
         await db.prepare(`DELETE FROM pending_connect_sessions WHERE state = ?`).bind(state).run();
         return null;
     }
@@ -49,7 +52,7 @@ export async function validateState(
     // Valid - delete session (one-time use)
     await db.prepare(`DELETE FROM pending_connect_sessions WHERE state = ?`).bind(state).run();
 
-    return result.telegram_id;
+    return result.telegram_user_id;
 }
 
 /**
@@ -58,16 +61,18 @@ export async function validateState(
 export async function saveConnection(
     db: D1Database,
     env: Env,
-    telegramId: number,
-    carvId: string,
-    walletAddress: string | null,
+    telegramUserId: string,
+    smartWallet: string | null,
+    signerWallet: string | null,
     email: string | null,
     accessToken: string | null,
-    refreshToken: string | null
+    refreshToken: string | null,
+    expiresIn: number | null,
+    scope: string | null
 ): Promise<void> {
     const now = Date.now();
+    const tokenExpiresAt = expiresIn ? now + (expiresIn * 1000) : null;
 
-    // Encrypt tokens if provided
     let accessTokenEnc = null;
     let refreshTokenEnc = null;
 
@@ -79,35 +84,42 @@ export async function saveConnection(
         refreshTokenEnc = await encrypt(refreshToken, env.ENCRYPTION_SECRET);
     }
 
-    // Upsert connection
     await db.prepare(`
-        INSERT INTO connections (telegram_id, carv_id, wallet_address, email, access_token_encrypted, refresh_token_encrypted, linked_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(telegram_id) DO UPDATE SET
-            carv_id = excluded.carv_id,
-            wallet_address = excluded.wallet_address,
-            email = excluded.email,
-            access_token_encrypted = excluded.access_token_encrypted,
-            refresh_token_encrypted = excluded.refresh_token_encrypted,
-            updated_at = excluded.updated_at
-    `).bind(telegramId, carvId, walletAddress, email, accessTokenEnc, refreshTokenEnc, now, now).run();
+        INSERT INTO connections (
+            telegram_user_id, smart_wallet_address, signer_wallet_address, 
+            email_address, access_token_enc, refresh_token_enc, 
+            token_expires_at, scope, linked_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(telegram_user_id) DO UPDATE SET
+            smart_wallet_address = excluded.smart_wallet_address,
+            signer_wallet_address = excluded.signer_wallet_address,
+            email_address = excluded.email_address,
+            access_token_enc = excluded.access_token_enc,
+            refresh_token_enc = excluded.refresh_token_enc,
+            token_expires_at = excluded.token_expires_at,
+            scope = excluded.scope,
+            linked_at = excluded.linked_at
+    `).bind(
+        telegramUserId, smartWallet, signerWallet,
+        email, accessTokenEnc, refreshTokenEnc,
+        tokenExpiresAt, scope, now
+    ).run();
 
-    // Log event
-    await logAuthEvent(db, telegramId, 'LINKED', `Linked to CARV ID: ${carvId}`);
+    await logAuthEvent(db, telegramUserId, 'LINKED', `Linked to CARV wallet: ${smartWallet}`);
 }
 
 /**
- * Get connection by telegram_id
+ * Get connection by telegram_user_id
  */
 export async function getConnection(
     db: D1Database
-): Promise<(telegramId: number) => Promise<CarvConnection | null>> {
-    return async (telegramId: number) => {
+): Promise<(telegramUserId: number | string) => Promise<CarvConnection | null>> {
+    return async (telegramUserId: number | string) => {
         const result = await db.prepare(`
-            SELECT id, telegram_id, carv_id, wallet_address, email, linked_at
-            FROM connections
-            WHERE telegram_id = ?
-        `).bind(telegramId).first<CarvConnection>();
+            SELECT * FROM connections
+            WHERE telegram_user_id = ?
+        `).bind(telegramUserId.toString()).first<CarvConnection>();
 
         return result || null;
     };
@@ -118,18 +130,18 @@ export async function getConnection(
  */
 export async function logAuthEvent(
     db: D1Database,
-    telegramId: number,
-    eventType: string,
-    details: string
+    telegramUserId: string | number,
+    event: string,
+    detail: string
 ): Promise<void> {
     await db.prepare(`
-        INSERT INTO auth_logs (telegram_id, event_type, details, timestamp)
-        VALUES (?, ?, ?, ?)
-    `).bind(telegramId, eventType, details, Date.now()).run();
+        INSERT INTO auth_logs (id, telegram_user_id, event, detail, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).bind(crypto.randomUUID(), telegramUserId.toString(), event, detail, Date.now()).run();
 }
 
 /**
- * Clean up expired sessions (call periodically)
+ * Clean up expired sessions
  */
 export async function cleanupExpiredSessions(db: D1Database): Promise<void> {
     await db.prepare(`

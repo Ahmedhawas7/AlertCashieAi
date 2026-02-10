@@ -16,12 +16,15 @@ crons = ["0 9 * * *"]  # Daily at 09:00 Africa/Cairo
 # Default variables
 DEFAULT_GROUP_MODE = "chatty"
 DEFAULT_GROUP_LANG = "ar"
-AI_ENABLED_DEFAULT = "false"
+AI_ENABLED_DEFAULT = "true"
 TELEGRAM_ADMIN_IDS = "6856984764"
+AI_DAILY_LIMIT = "99999"
 
 # CARV OAuth Configuration
-OWNER_TELEGRAM_ID = "TELEGRAM_ADMIN_IDS"  # Replace with your Telegram user ID
+OWNER_TELEGRAM_ID = "6856984764"  # Your Telegram user ID
 CARV_REDIRECT_URL = "https://hawas-worker.hawas-alertai.workers.dev/auth/carv/callback"
+BASE_RPC_URL = "https://mainnet.base.org"
+USDC_BASE_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 
 # Secrets (add via `wrangler secret put <NAME>`)
 # BOT_TOKEN

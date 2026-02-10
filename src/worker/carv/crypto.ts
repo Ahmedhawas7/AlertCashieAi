@@ -7,44 +7,33 @@ export async function encrypt(text: string, secret: string): Promise<string> {
     const encoder = new TextEncoder();
     const data = encoder.encode(text);
 
-    // Derive key from secret
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        encoder.encode(secret.padEnd(32, '0').slice(0, 32)),
-        'PBKDF2',
-        false,
-        ['deriveBits', 'deriveKey']
-    );
+    let keyData: Uint8Array;
+    if (secret.length === 64 && /^[0-9a-fA-F]+$/.test(secret)) {
+        // Hex to byte array
+        keyData = new Uint8Array(secret.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    } else {
+        keyData = encoder.encode(secret.padEnd(32, '0').slice(0, 32));
+    }
 
-    const key = await crypto.subtle.deriveKey(
-        {
-            name: 'PBKDF2',
-            salt: encoder.encode('carv-salt'),
-            iterations: 100000,
-            hash: 'SHA-256'
-        },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
+    const key = await crypto.subtle.importKey(
+        'raw',
+        keyData,
+        { name: 'AES-GCM' },
         false,
         ['encrypt']
     );
 
-    // Generate random IV
     const iv = crypto.getRandomValues(new Uint8Array(12));
-
-    // Encrypt
     const encrypted = await crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
         key,
         data
     );
 
-    // Combine IV + encrypted data
     const combined = new Uint8Array(iv.length + encrypted.byteLength);
     combined.set(iv);
     combined.set(new Uint8Array(encrypted), iv.length);
 
-    // Return as base64
     return btoa(String.fromCharCode(...combined));
 }
 
@@ -52,36 +41,25 @@ export async function decrypt(encryptedText: string, secret: string): Promise<st
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
-    // Decode from base64
     const combined = Uint8Array.from(atob(encryptedText), c => c.charCodeAt(0));
-
-    // Extract IV and encrypted data
     const iv = combined.slice(0, 12);
     const data = combined.slice(12);
 
-    // Derive key
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        encoder.encode(secret.padEnd(32, '0').slice(0, 32)),
-        'PBKDF2',
-        false,
-        ['deriveBits', 'deriveKey']
-    );
+    let keyData: Uint8Array;
+    if (secret.length === 64 && /^[0-9a-fA-F]+$/.test(secret)) {
+        keyData = new Uint8Array(secret.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    } else {
+        keyData = encoder.encode(secret.padEnd(32, '0').slice(0, 32));
+    }
 
-    const key = await crypto.subtle.deriveKey(
-        {
-            name: 'PBKDF2',
-            salt: encoder.encode('carv-salt'),
-            iterations: 100000,
-            hash: 'SHA-256'
-        },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
+    const key = await crypto.subtle.importKey(
+        'raw',
+        keyData,
+        'AES-GCM',
         false,
         ['decrypt']
     );
 
-    // Decrypt
     const decrypted = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv },
         key,

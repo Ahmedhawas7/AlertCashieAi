@@ -129,8 +129,51 @@ export class AgentMemorySystem {
     }
 
     /**
-     * Get agent status
+     * Phase 1: Persistent Agent Memory
      */
+
+    async rememberUserFact(userId: string, factType: string, factValue: string, confidence: number = 1.0): Promise<void> {
+        const now = Date.now();
+        await this.db.prepare(`
+            INSERT INTO memories (chat_id, type, key, value, confidence, ts, deprecated)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+        `).bind(userId, factType, factType, factValue, confidence, now).run();
+    }
+
+    async recallUserFacts(userId: string, limit: number = 20): Promise<any[]> {
+        const result = await this.db.prepare(`
+            SELECT type, key, value, confidence, ts 
+            FROM memories 
+            WHERE chat_id = ? AND deprecated = 0 
+            ORDER BY ts DESC LIMIT ?
+        `).bind(userId, limit).all();
+        return result.results || [];
+    }
+
+    async updateUserFact(userId: string, factType: string, factValue: string): Promise<void> {
+        const now = Date.now();
+        await this.db.prepare(`
+            UPDATE memories 
+            SET value = ?, ts = ?, confidence = 1.0
+            WHERE chat_id = ? AND type = ? AND deprecated = 0
+        `).bind(factValue, now, userId, factType).run();
+    }
+
+    async logInteraction(userId: string, message: string, intent: string, response: string): Promise<void> {
+        const now = Date.now();
+        // Log to messages for context
+        await this.db.prepare("INSERT INTO messages (chat_id, role, text, ts) VALUES (?, 'user', ?, ?)").bind(userId, message, now).run();
+        await this.db.prepare("INSERT INTO messages (chat_id, role, text, ts) VALUES (?, 'bot', ?, ?)").bind(userId, response, now).run();
+
+        // Also log to agent_logs for structured tracking
+        await this.logEvent({
+            event_type: 'interaction',
+            event_data: JSON.stringify({ message, intent, response }),
+            telegram_id: parseInt(userId),
+            chat_id: parseInt(userId)
+        });
+    }
+
     async getStatus(): Promise<string> {
         // Get total events
         const totalEventsResult = await this.db.prepare(`
