@@ -14,6 +14,10 @@ import { FreeAiSearch } from './freeai/search';
 import { composeAnswer, formatCitations } from './freeai/answer';
 import { FreeAiStore } from './freeai/store';
 
+// ✅ PolyAgent (MVP)
+import { getPolySettings, setPolySettings } from './polyAgent/state';
+import { scanPolymarketMVP } from './polyAgent/scanner';
+
 export default {
     async fetch(request: Request, env: Env): Promise<Response> {
         try {
@@ -65,8 +69,23 @@ export default {
                 if (!telegramUserId) return new Response('Invalid state', { status: 400 });
                 const tokens = await exchangeCodeForTokens(env, code);
                 const userInfo = await getUserInfo(env, tokens.access_token);
-                await saveConnection(env.DB, env, telegramUserId, userInfo.smart_wallet_address || null, userInfo.signer_wallet_address || null, userInfo.email || null, tokens.access_token, tokens.refresh_token || null, tokens.expires_in || null, 'carv_id_basic_read email_basic_read evm_address_basic_read');
-                await sendTelegramMessage(env.BOT_TOKEN, parseInt(telegramUserId), `✅ <b>تم الربط بنجاح!</b>\n\n🆔 Wallet: <code>${userInfo.smart_wallet_address}</code>`);
+                await saveConnection(
+                    env.DB,
+                    env,
+                    telegramUserId,
+                    userInfo.smart_wallet_address || null,
+                    userInfo.signer_wallet_address || null,
+                    userInfo.email || null,
+                    tokens.access_token,
+                    tokens.refresh_token || null,
+                    tokens.expires_in || null,
+                    'carv_id_basic_read email_basic_read evm_address_basic_read'
+                );
+                await sendTelegramMessage(
+                    env.BOT_TOKEN,
+                    parseInt(telegramUserId),
+                    `✅ <b>تم الربط بنجاح!</b>\n\n🆔 Wallet: <code>${userInfo.smart_wallet_address}</code>`
+                );
                 return new Response('Success! Return to Telegram.');
             }
 
@@ -118,6 +137,57 @@ export default {
                                 await sendTelegramMessage(env.BOT_TOKEN, chatId, diag);
                             } else if (command === '/help') {
                                 await sendTelegramMessage(env.BOT_TOKEN, chatId, "أنا حواس، بساعدك في إدارة معاملاتك وقراءة الروابط.", { reply_markup: getMainMenu() });
+
+                            // ✅ PolyAgent Commands (MVP)
+                            } else if (command === '/poly_status') {
+                                const s = await getPolySettings();
+                                await sendTelegramMessage(
+                                    env.BOT_TOKEN,
+                                    chatId,
+                                    `🧠 <b>PolyAgent</b>\n\n` +
+                                    `Mode: <b>${s.mode}</b>\n` +
+                                    `Min Mispricing: <b>${s.minMispricingPct}%</b>\n` +
+                                    `Max Risk: <b>${s.maxRiskPct}%</b>\n` +
+                                    `Updated: <code>${s.updatedAt}</code>`
+                                );
+                            } else if (command === '/poly_observe_on') {
+                                const s = await getPolySettings();
+                                await setPolySettings({ ...s, mode: 'OBSERVE', updatedAt: new Date().toISOString() });
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `✅ PolyAgent: OBSERVE شغّال.\nاكتب /poly_scan_now`);
+                            } else if (command === '/poly_execute_on') {
+                                if (!isOwner) {
+                                    await sendTelegramMessage(env.BOT_TOKEN, chatId, `❌ الأمر ده للمالك فقط.`);
+                                } else {
+                                    await sendTelegramMessage(
+                                        env.BOT_TOKEN,
+                                        chatId,
+                                        `⚠️ تحذير: EXECUTE هينفّذ تداول تلقائي وده ممكن يخسّرك.\n` +
+                                        `لو متأكد اكتب:\n<code>/poly_confirm EXECUTE</code>`
+                                    );
+                                }
+                            } else if (command === '/poly_confirm') {
+                                if (!isOwner) {
+                                    await sendTelegramMessage(env.BOT_TOKEN, chatId, `❌ الأمر ده للمالك فقط.`);
+                                } else if (args === 'EXECUTE') {
+                                    const s = await getPolySettings();
+                                    await setPolySettings({ ...s, mode: 'EXECUTE', updatedAt: new Date().toISOString() });
+                                    await sendTelegramMessage(env.BOT_TOKEN, chatId, `✅ PolyAgent: EXECUTE اتفعّل.\n(لسه MVP… التنفيذ الحقيقي هنضيفه بعد توصيل API)`);
+                                } else {
+                                    await sendTelegramMessage(env.BOT_TOKEN, chatId, `اكتب: /poly_confirm EXECUTE`);
+                                }
+                            } else if (command === '/poly_scan_now') {
+                                const s = await getPolySettings();
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `🔎 جاري الاسكان…`);
+
+                                const opps = await scanPolymarketMVP(s);
+                                if (!opps.length) {
+                                    await sendTelegramMessage(env.BOT_TOKEN, chatId, `مفيش فرص دلوقتي حسب Threshold (${s.minMispricingPct}%).`);
+                                } else {
+                                    const lines = opps.slice(0, 5).map(o =>
+                                        `• <b>${o.market}</b>\nYES: ${o.yes} | NO: ${o.no} | SUM: ${o.sum}\nMispricing: <b>${o.mispricingPct.toFixed(2)}%</b>\n${o.note}`
+                                    ).join('\n\n');
+                                    await sendTelegramMessage(env.BOT_TOKEN, chatId, `✅ فرص:\n\n${lines}`);
+                                }
                             }
                         } else {
                             // Normal message
