@@ -19,6 +19,9 @@ import { GroupSettings, GroupMode } from './agent/groupSettings';
 import { WhaleExecutor } from './whale/executor';
 import { WhaleBalance } from './whale/balance';
 
+// ✅ PolyAgent (MVP)
+import { getPolySettings, setPolySettings } from './polyAgent/state';
+
 export default {
     async fetch(request: Request, env: Env): Promise<Response> {
         try {
@@ -68,8 +71,23 @@ export default {
                 if (!telegramUserId) return new Response('Invalid state', { status: 400 });
                 const tokens = await exchangeCodeForTokens(env, code);
                 const userInfo = await getUserInfo(env, tokens.access_token);
-                await saveConnection(env.DB, env, telegramUserId, userInfo.smart_wallet_address || null, userInfo.signer_wallet_address || null, userInfo.email || null, tokens.access_token, tokens.refresh_token || null, tokens.expires_in || null, 'carv_id_basic_read email_basic_read evm_address_basic_read');
-                await sendTelegramMessage(env.BOT_TOKEN, parseInt(telegramUserId), `✅ <b>تم الربط بنجاح!</b>\n\n🆔 Wallet: <code>${userInfo.smart_wallet_address}</code>`);
+                await saveConnection(
+                    env.DB,
+                    env,
+                    telegramUserId,
+                    userInfo.smart_wallet_address || null,
+                    userInfo.signer_wallet_address || null,
+                    userInfo.email || null,
+                    tokens.access_token,
+                    tokens.refresh_token || null,
+                    tokens.expires_in || null,
+                    'carv_id_basic_read email_basic_read evm_address_basic_read'
+                );
+                await sendTelegramMessage(
+                    env.BOT_TOKEN,
+                    parseInt(telegramUserId),
+                    `✅ <b>تم الربط بنجاح!</b>\n\n🆔 Wallet: <code>${userInfo.smart_wallet_address}</code>`
+                );
                 return new Response('Success! Return to Telegram.');
             }
 
@@ -180,7 +198,6 @@ export default {
                             } else if (command === '/memory' && isOwner) {
                                 const targetId = args || userId.toString();
                                 const summary = await brain.getMemorySummary(targetId);
-                                await sendTelegramMessage(env.BOT_TOKEN, chatId, summary, { parse_mode: 'Markdown' });
                                 await sendTelegramMessage(env.BOT_TOKEN, chatId, summary, { parse_mode: 'Markdown' });
                             } else if (command === '/poly_status' && isOwner) {
                                 const poly = new PolyAgent(env);
