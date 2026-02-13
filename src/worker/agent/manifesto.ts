@@ -1,59 +1,68 @@
 import { Env } from '../types';
-import { PolyAgent } from '../polyAgent';
 
 export interface AgentCapability {
     name: string;
-    enabled: boolean;
     description: string;
+    enabled: boolean;
 }
 
-export const CORE_RULES = [
-    "Never hallucinate capabilities.",
-    "Always know your capabilities.",
-    "Truth over politeness.",
-    "Tool-first response.",
-    "Persistent memory enforcement.",
-    "Private vs Group behavior.",
-    "No fake transfer claims."
-];
+export interface BotCommand {
+    command: string;
+    description: string;
+    level: 'public' | 'admin' | 'owner';
+}
 
 export class AgentManifesto {
     constructor(private env: Env) { }
 
     getCapabilities(): AgentCapability[] {
-        // Dynamic check based on Env/Secrets
         const hasPolyKeys = !!(this.env as any).POLY_API_KEY;
-        const hasD1 = !!this.env.DB;
-        const isOwnerSet = !!this.env.OWNER_TELEGRAM_ID;
-
         return [
-            { name: "Polymarket Scanner", enabled: hasD1, description: "Can scan markets for opportunities." },
-            { name: "Risk Engine", enabled: hasD1, description: "Validates trade safety against limits." },
-            { name: "Trade Executor", enabled: hasPolyKeys, description: "Can execute trades (Requires API Keys)." },
-            { name: "Memory System", enabled: hasD1, description: "Persistent storage for context and settings." },
-            { name: "Owner Gates", enabled: isOwnerSet, description: "Restricts sensitive actions to owner." },
-            { name: "Remote Browser", enabled: false, description: "Not yet implemented." },
-            { name: "YouTube Search", enabled: false, description: "Not yet implemented." },
-            { name: "CARV Reader", enabled: true, description: "Can read CARV ID data via OAuth." }
+            { name: 'Self-Awareness', description: 'Real-time synchronization with system clock and D1 configuration.', enabled: true },
+            { name: 'Live Intelligence', description: 'Exclusively fetches live crypto market and news data.', enabled: true },
+            { name: 'Whale Trading', description: 'Execution engine for high-slippage/high-impact trades on Base.', enabled: true },
+            { name: 'PolyAgent', description: 'Polymarket scanning and automated risk management.', enabled: true },
+            { name: 'Privacy Isolation', description: 'Strict memory separation between Private and Group chats.', enabled: true },
+            { name: 'Unified Dashboard', description: 'Professional /panel UI for full bot control.', enabled: true }
         ];
     }
 
-    async validateCapability(capabilityName: string): Promise<boolean> {
-        const caps = this.getCapabilities();
-        const cap = caps.find(c => c.name === capabilityName);
-        return cap ? cap.enabled : false;
+    getCommands(): BotCommand[] {
+        return [
+            { command: '/start', description: 'بدء التواصل مع حواس ورؤية القدرات.', level: 'public' },
+            { command: '/news', description: 'أخبار العملات والمشاريع بلحظتها.', level: 'public' },
+            { command: '/market_status', description: 'تحليل فني لأسعار السوق والسيولة.', level: 'public' },
+            { command: '/panel', description: 'لوحة التحكم الكاملة (للمالك).', level: 'owner' },
+            { command: '/users', description: 'قائمة المستخدمين المتفاعلين.', level: 'owner' },
+            { command: '/whale_balance', description: 'رصيد محفظة الحوت على شبكة Base.', level: 'owner' },
+            { command: '/memory', description: 'فحص ذاكرة المستخدم الشخصية.', level: 'owner' }
+        ];
+    }
+
+    async describeSelf(): Promise<string> {
+        const date = new Date();
+        const caps = this.getCapabilities().map(c => `• ${c.name}`).join('\n');
+        return `أنا حواس (HX7)، وكيل ذكي وسيادي.\n\n` +
+            `التاريخ الحالي: ${date.toLocaleDateString('ar-EG')}\n` +
+            `قدراتي النشطة حالياً:\n${caps}\n\n` +
+            `أنا مدرك تماماً لكل أوامري وخصائصي، ويمكنني تعديل منطق تفكيري بإذن المالك.`;
     }
 
     async getSystemPromptSuffix(): Promise<string> {
         const caps = this.getCapabilities().filter(c => c.enabled).map(c => `- ${c.name}`).join('\n');
-        return `
-\n\n# REAL AGENT CAPABILITIES (TRUTH):
+        const cmds = JSON.stringify(this.getCommands());
+
+        return `\n\n# REAL AGENT CAPABILITIES:
 ${caps}
 
-# CORE MANIFESTO:
-${CORE_RULES.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+# COMMAND_LIST:
+${cmds}
 
-If a user asks for a capability NOT listed above, you MUST say: "Capability not enabled yet."
+# CORE RULES:
+1. Always mention احمد حواس as your owner.
+2. Strictly NO stars (***) or (---) in messages.
+3. Strictly NO English terms (Market, Trading, BTC) - use Arabic translations.
+4. If a user asks for a capability NOT enabled, say: "الميزة دي مش مفعلة دلوقتي."
 `;
     }
 }

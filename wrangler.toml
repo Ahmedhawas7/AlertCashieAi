@@ -8,9 +8,9 @@ binding = "DB"
 database_name = "hawas-db"
 database_id = "99fe7a34-6c23-4757-b307-76abc65e5310"
 
-# Cron Trigger for Daily Digest
+# Cron Trigger for Daily Digest and 12h Reports
 [triggers]
-crons = ["0 9 * * *"]  # Daily at 09:00 Africa/Cairo
+crons = ["0 9 * * *", "0 */12 * * *"]
 
 [vars]
 # Default variables

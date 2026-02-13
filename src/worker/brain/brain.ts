@@ -17,6 +17,8 @@ import { BrainTools, ToolResult } from './tools';
 import { GroqProvider } from '../ai/providers/groq';
 import { PLANNER_SYSTEM_PROMPT, RESPONDER_SYSTEM_PROMPT_EGYPT } from '../ai/systemPrompt';
 import { AgentManifesto } from '../agent/manifesto';
+import { LiveNews } from '../intel/liveNews';
+import { IntelFormatter } from '../intel/formatter';
 
 /**
  * HawasBrain: The hybrid orchestrator for the Sovereign Agent (v2).
@@ -56,6 +58,30 @@ export class BrainV2 {
     async handleMessage(userId: string, senderName: string, text: string, chatId?: string): Promise<string | HawasResponse> {
         const aiEnabled = await this.isAiEnabled(userId);
         const withinQuota = aiEnabled ? await this.checkAndIncrementAiQuota(userId) : false;
+
+        // FORCED LIVE INTEL INTERCEPT
+        const intelKeywords = ["أخبار", "news", "crypto", "carv", "base", "polymarket"];
+        const needsLiveIntel = intelKeywords.some(kw => text.toLowerCase().includes(kw));
+
+        if (needsLiveIntel) {
+            const intel = await LiveNews.fetchLatest();
+            if (!intel) {
+                return "لا توجد بيانات حديثة مؤكدة حالياً. جاري البحث والتحديث.";
+            }
+
+            if (text.includes("أخبار") || text.includes("news")) {
+                return IntelFormatter.formatNewsReport(intel, text);
+            } else {
+                return IntelFormatter.formatMarketStatus(intel);
+            }
+        }
+
+        // SELF-AWARENESS INTERCEPT
+        if (text.includes("مين انت") || text.includes("مين إنت") || text.includes("قدراتك") || text.includes("أوامرك")) {
+            const manifesto = new AgentManifesto(this.env);
+            return await manifesto.describeSelf();
+        }
+
         const nluResult = this.nlu.parse(text);
 
         // CHECK NAME (New Persona Rule)
@@ -238,7 +264,24 @@ export class BrainV2 {
 
         console.log(`Two-pass reasoning: ${totalLatency}ms (Planner: ${plannerResult.latencyMs}ms, Responder: ${responderResult.latencyMs}ms)`);
 
-        return responderResult.text;
+        return this.cleanResponse(responderResult.text);
+    }
+
+    private cleanResponse(text: string): string {
+        let clean = text
+            .replace(/\*\*\*+/g, '') // Remove ***
+            .replace(/---+/g, '') // Remove ---
+            .replace(/\*\*/g, '<b>').replace(/\*\*/g, '</b>')
+            .replace(/Bitcoin/gi, 'بتكوين')
+            .replace(/Ethereum/gi, 'إيثيريوم')
+            .replace(/Market/gi, 'السوق')
+            .replace(/Trading/gi, 'التداول')
+            .replace(/Profit/gi, 'الربح')
+            .replace(/Loss/gi, 'الخسارة')
+            .replace(/Balance/gi, 'الرصيد')
+            .replace(/Volume/gi, 'حجم التداول');
+
+        return clean.trim();
     }
 
     /**
@@ -344,7 +387,7 @@ export class BrainV2 {
         return response;
     }
 
-    private async isAiEnabled(userId: string): Promise<boolean> {
+    public async isAiEnabled(userId: string): Promise<boolean> {
         const setting = await this.db.prepare(
             "SELECT ai_enabled FROM ai_user_settings WHERE user_id = ?"
         ).bind(userId).first<{ ai_enabled: number }>();
