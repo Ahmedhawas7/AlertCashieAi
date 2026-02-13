@@ -53,7 +53,7 @@ export class BrainV2 {
         this.groqProvider = new GroqProvider(env);
     }
 
-    async handleMessage(userId: string, senderName: string, text: string): Promise<string | HawasResponse> {
+    async handleMessage(userId: string, senderName: string, text: string, chatId?: string): Promise<string | HawasResponse> {
         const aiEnabled = await this.isAiEnabled(userId);
         const withinQuota = aiEnabled ? await this.checkAndIncrementAiQuota(userId) : false;
         const nluResult = this.nlu.parse(text);
@@ -211,7 +211,7 @@ export class BrainV2 {
         await this.autoExtractMemory(userId, text, plan);
 
         // Package context for Responder
-        const memoryContext = await this.packageAiContext(userId, text);
+        const memoryContext = await this.packageAiContext(userId, text, plan.chatId || userId);
         const toolContext = this.formatToolResults(toolResults);
 
         // PASS 2: RESPONDER - Generate final answer
@@ -307,7 +307,7 @@ export class BrainV2 {
 
         if (citations.length > 0) {
             const aiResult = composeAnswer(text, citations);
-            response = aiResult.answer + formatCitations(aiResult.citations);
+            response = aiResult.answer;
         } else {
             const searchResults = await this.retrieval.retrieve(userId, text);
             if (searchResults.length > 0 && searchResults[0].score > 20) {
@@ -368,11 +368,25 @@ export class BrainV2 {
         return true;
     }
 
-    private async packageAiContext(userId: string, text: string): Promise<string> {
-        const facts = await this.db.prepare("SELECT key, value FROM user_memory WHERE user_id = ? ORDER BY updated_at DESC LIMIT 5").bind(userId).all<{ key: string, value: string }>();
-        const memoryContext = (facts.results && facts.results.length > 0) ? "USER FACTS:\n" + facts.results.map(f => `- ${f.key}: ${f.value}`).join("\n") : "";
-        const history = await this.db.prepare("SELECT text FROM episodic_logs WHERE user_id = ? ORDER BY ts DESC LIMIT 3").bind(userId).all<{ text: string }>();
-        const historyContext = (history.results && history.results.length > 0) ? "RECENT MESSAGES:\n" + history.results.reverse().map(h => `- ${h.text}`).join("\n") : "";
+    private async packageAiContext(userId: string, text: string, chatId?: string): Promise<string> {
+        const isPrivate = chatId === userId;
+
+        const facts = await this.db.prepare("SELECT key, value FROM user_memory WHERE user_id = ? ORDER BY updated_at DESC LIMIT 10").bind(userId).all<{ key: string, value: string }>();
+
+        // In groups, filter out potentially sensitive facts or detailed preferences
+        let processedFacts = facts.results || [];
+        if (!isPrivate) {
+            processedFacts = processedFacts.filter(f => ['name', 'identity', 'job'].includes(f.key));
+        }
+
+        const memoryContext = processedFacts.length > 0 ? "USER FACTS:\n" + processedFacts.map(f => `- ${f.key}: ${f.value}`).join("\n") : "";
+
+        // Only include conversation history in private chats
+        let historyContext = "";
+        if (isPrivate) {
+            const history = await this.db.prepare("SELECT text FROM episodic_logs WHERE user_id = ? ORDER BY ts DESC LIMIT 5").bind(userId).all<{ text: string }>();
+            historyContext = (history.results && history.results.length > 0) ? "RECENT MESSAGES:\n" + history.results.reverse().map(h => `- ${h.text}`).join("\n") : "";
+        }
         const kbResults = await this.retrieval.retrieve(userId, text);
         const kbContext = kbResults.length > 0 ? "KNOWLEDGE:\n" + kbResults.slice(0, 2).map(k => `- ${k.text.substring(0, 200)}`).join("\n") : "";
         return `${memoryContext}\n\n${historyContext}\n\n${kbContext}`.trim();

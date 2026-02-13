@@ -18,6 +18,7 @@ import { AgentManifesto } from './agent/manifesto';
 import { GroupSettings, GroupMode } from './agent/groupSettings';
 import { WhaleExecutor } from './whale/executor';
 import { WhaleBalance } from './whale/balance';
+import { UserManager } from './agent/userManager';
 
 // ✅ PolyAgent (MVP)
 import { getPolySettings, setPolySettings } from './polyAgent/state';
@@ -102,6 +103,14 @@ export default {
                     const senderName = update.message?.from.first_name || update.callback_query?.from.first_name || "User";
                     const isOwner = userId?.toString() === env.OWNER_TELEGRAM_ID;
 
+                    // 0. Track User
+                    if (update.message?.from || update.callback_query?.from) {
+                        const tgUser = (update.message?.from || update.callback_query?.from)!;
+                        const um = new UserManager(env.DB);
+                        const chatType = update.message?.chat?.type || update.callback_query?.message?.chat?.type;
+                        await um.trackUser(tgUser, chatType === 'private');
+                    }
+
                     // Handle Callback Queries (Buttons)
                     if (update.callback_query) {
                         const data = update.callback_query.data || "";
@@ -116,6 +125,33 @@ export default {
                                 const txId = data.split(':')[1];
                                 await env.DB.prepare("UPDATE pending_tx SET status = 'cancelled' WHERE id = ?").bind(txId).run();
                                 await sendTelegramMessage(env.BOT_TOKEN, chatId, `❌ **تم إلغاء التحويل.**`, { message_thread_id: messageThreadId });
+                                return new Response('OK');
+                            } else if (data === 'panel_whale_toggle' && isOwner) {
+                                const mode = await env.DB.prepare("SELECT value FROM poly_settings WHERE key = 'whale_mode'").first<string>('value') || 'OBSERVE';
+                                const newMode = mode === 'EXECUTE' ? 'OBSERVE' : 'EXECUTE';
+                                await env.DB.prepare("INSERT INTO poly_settings (key, value) VALUES ('whale_mode', ?) ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value").bind(newMode).run();
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `🐋 Whale Mode -> **${newMode}**`);
+                                return new Response('OK');
+                            } else if (data === 'panel_poly_toggle' && isOwner) {
+                                const poly = new PolyAgent(env);
+                                const s = await poly.db.getSettings();
+                                const newMode = s.mode === 'EXECUTE' ? 'OBSERVE' : 'EXECUTE';
+                                await poly.db.saveSettings({ ...s, mode: newMode as any });
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `🛡️ PolyAgent Mode -> **${newMode}**`);
+                                return new Response('OK');
+                            } else if (data === 'panel_news_push' && isOwner) {
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, "⏳ جاري تحضير خبر عاجل...");
+                                const brain = new BrainV2(env.DB, env);
+                                const news = await brain.handleMessage(userId.toString(), senderName, "انشر خبر عن احدث تطورات الكريبتو اليوم");
+                                const newsText = typeof news === 'string' ? news : news.text;
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `📢 **خبر عاجل:**\n\n${newsText}`);
+                                return new Response('OK');
+                            } else if (data === 'panel_balance_refresh' && isOwner) {
+                                const wb = new WhaleBalance(env);
+                                const ex = new WhaleExecutor(env);
+                                const addr = await ex.getAddress();
+                                const b = await wb.getBalances(addr);
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `💰 **Balances Updated:**\nETH: \`${b.eth}\`\nUSDC: \`${b.usdc}\``);
                                 return new Response('OK');
                             }
                         }
@@ -166,6 +202,40 @@ export default {
                                 await savePendingSession(env.DB, uid.toString(), state, expiresAt);
                                 const authUrl = generateAuthUrl(env, state);
                                 await sendTelegramMessage(env.BOT_TOKEN, chatId, `اضغط هنا للربط: [Connect CARV ID](${authUrl})`, { parse_mode: 'Markdown' });
+                            } else if (command === '/users' && isOwner) {
+                                const um = new UserManager(env.DB);
+                                const users = await um.getPrivateUsers();
+                                const total = await um.getUserCount();
+                                let msg = `👥 **قائمة المستخدمين (الخاص)**\nإجمالي: ${total}\n\n`;
+                                for (const u of users) {
+                                    const username = u.username ? `@${u.username}` : 'No Username';
+                                    msg += `• [${u.first_name}](tg://user?id=${u.telegram_id}) (${username})\n`;
+                                }
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, msg, { parse_mode: 'Markdown' });
+                            } else if (command === '/panel' && isOwner) {
+                                const modeWhale = await env.DB.prepare("SELECT value FROM poly_settings WHERE key = 'whale_mode'").first<string>('value') || 'OBSERVE';
+                                const poly = new PolyAgent(env);
+                                const polyS = await poly.db.getSettings();
+
+                                const panel = {
+                                    text: `🛠️ **لوحة التحكم المتقدمة** (HX7 Control)\n\n` +
+                                        `🐋 **Whale Engine**: \`${modeWhale}\`\n` +
+                                        `🛡️ **PolyAgent**: \`${polyS.mode}\`\n` +
+                                        `📊 **Monitoring**: Active`,
+                                    reply_markup: {
+                                        inline_keyboard: [
+                                            [
+                                                { text: `🐋 Whale: ${modeWhale === 'EXECUTE' ? '🟢 ON' : '🟡 OBS'}`, callback_data: 'panel_whale_toggle' },
+                                                { text: `🛡️ Poly: ${polyS.mode === 'EXECUTE' ? '🟢 ON' : '🟡 OBS'}`, callback_data: 'panel_poly_toggle' }
+                                            ],
+                                            [
+                                                { text: "💰 Refresh Balances", callback_data: 'panel_balance_refresh' },
+                                                { text: "📢 Force News", callback_data: 'panel_news_push' }
+                                            ]
+                                        ]
+                                    }
+                                };
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, panel.text, panel);
                             } else if (command === '/read') {
                                 if (!args) {
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, "ابعت رابط أقرأه.");
@@ -242,7 +312,7 @@ export default {
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, `⏳ جاري البحث والتحضير عن: **${args}**...`, { parse_mode: 'Markdown' });
                                     const brain = new BrainV2(env.DB, env);
                                     // Use deepResearch or specific news flow
-                                    const news = await brain.handleMessage(userId.toString(), senderName, `انشر خبر عن ${args}`);
+                                    const news = await brain.handleMessage(userId.toString(), senderName, `انشر خبر عن ${args}`, chatId.toString());
                                     const newsText = typeof news === 'string' ? news : news.text;
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, `📢 **خبر هام من حواس:**\n\n${newsText}`, { parse_mode: 'Markdown' });
                                 }
@@ -301,7 +371,7 @@ export default {
                                 }
                             }
 
-                            const result = await brain.handleMessage(userId.toString(), senderName, text);
+                            const result = await brain.handleMessage(userId.toString(), senderName, text, chatId.toString());
                             if (result) {
                                 if (typeof result === 'string') {
                                     const manifesto = new AgentManifesto(env);
