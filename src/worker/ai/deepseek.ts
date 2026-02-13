@@ -1,4 +1,5 @@
 import { Env } from '../types';
+import { SYSTEM_PROMPT_EGYPT } from './systemPrompt';
 
 /**
  * DeepSeek Chat Client
@@ -46,7 +47,7 @@ export async function deepseekChat(
             body: JSON.stringify({
                 model: "deepseek-chat",
                 messages: [
-                    { role: "system", content: HAWAS_SYSTEM_PROMPT },
+                    { role: "system", content: SYSTEM_PROMPT_EGYPT },
                     { role: "user", content: fullUserTask }
                 ],
                 temperature: 0.7,

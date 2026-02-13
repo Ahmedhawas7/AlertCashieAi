@@ -21,6 +21,13 @@ export interface Env {
     OPENROUTER_BASE_URL?: string;
     OPENROUTER_MODEL?: string;
 
+    // Groq Multi-Model Configuration
+    GROQ_MODEL_PRIMARY?: string;
+    GROQ_MODEL_FALLBACK?: string;
+    GROQ_MODEL_FAST?: string;
+    AI_TEMPERATURE?: string;
+    AI_TOP_P?: string;
+
     // CARV ID OAuth
     DB: D1Database;
     OWNER_TELEGRAM_ID: string;
@@ -32,6 +39,7 @@ export interface Env {
     CARV_USERINFO_URL?: string;
     ENCRYPTION_SECRET?: string;
     BASE_RPC_URL?: string;
+    BASE_PRIVATE_KEY?: string; // Secret
     USDC_BASE_ADDRESS?: string;
 
     // Agent Personality
@@ -123,10 +131,12 @@ export interface TelegramCallbackQuery {
 
 export interface TelegramMessage {
     message_id: number;
+    message_thread_id?: number;
     from?: TelegramUser;
     chat: TelegramChat;
     date: number;
     text?: string;
+    caption?: string;
     reply_to_message?: TelegramMessage;
 }
 

@@ -1,13 +1,13 @@
 import { StorageService } from '../services/storage';
 import { Telegraf } from 'telegraf';
 import { MemoryStore } from '../memory/memoryStore';
-import cron from 'node-cron';
+import cron, { ScheduledTask } from 'node-cron';
 
 export class SchedulerService {
     private storage: StorageService;
     private bot: Telegraf;
     private memory: MemoryStore;
-    private tasks: Map<number, cron.ScheduledTask> = new Map();
+    private tasks: Map<number, ScheduledTask> = new Map();
 
     constructor(bot: Telegraf, storage: StorageService, memory: MemoryStore) {
         this.bot = bot;

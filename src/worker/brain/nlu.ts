@@ -6,6 +6,7 @@ export type Intent =
     | 'KB_SEARCH' | 'KB_ADD' | 'KB_LIST'
     | 'DEEP_RESEARCH' | 'DISTRIBUTE'
     | 'TROUBLESHOOT' | 'EXPLAIN' | 'SUMMARIZE'
+    | 'GENERAL'  // Added for conversational filler
     | 'UNKNOWN';
 
 export interface Entities {
