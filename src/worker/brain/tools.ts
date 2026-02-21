@@ -3,6 +3,8 @@ import { MemoryManager, UserFact } from './memory';
 import { FreeAiSearch } from '../freeai/search';
 import { composeAnswer } from '../freeai/answer';
 import { FreeAiPlanner } from '../freeai/planner';
+import { LiveNews } from '../intel/liveNews';
+import { IntelFormatter } from '../intel/formatter';
 import type { Citation } from '../freeai/types';
 
 /**
@@ -63,6 +65,12 @@ export class BrainTools {
 
                 case 'resolve_recipient':
                     return await this.tool_resolve_recipient(params.mention);
+
+                case 'news':
+                    return await this.tool_news();
+
+                case 'market_status':
+                    return await this.tool_market_status();
 
                 default:
                     return {
@@ -221,6 +229,30 @@ export class BrainTools {
             success: false,
             result: null,
             error: `No wallet found for @${username}`
+        };
+    }
+
+    /**
+     * Get latest news
+     */
+    private async tool_news(): Promise<ToolResult> {
+        const intel = await LiveNews.fetchLatest(true);
+        return {
+            tool: 'news',
+            success: !!intel,
+            result: intel
+        };
+    }
+
+    /**
+     * Get market status
+     */
+    private async tool_market_status(): Promise<ToolResult> {
+        const intel = await LiveNews.fetchLatest(true);
+        return {
+            tool: 'market_status',
+            success: !!intel,
+            result: intel ? IntelFormatter.formatMarketStatus(intel) : null
         };
     }
 }

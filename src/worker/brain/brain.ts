@@ -15,6 +15,7 @@ import { FreeAiSearch } from '../freeai/search';
 import { composeAnswer, formatCitations } from '../freeai/answer';
 import { BrainTools, ToolResult } from './tools';
 import { GroqProvider } from '../ai/providers/groq';
+import { AgencySystem } from './agency';
 import { PLANNER_SYSTEM_PROMPT, RESPONDER_SYSTEM_PROMPT_EGYPT } from '../ai/systemPrompt';
 import { AgentManifesto } from '../agent/manifesto';
 import { LiveNews } from '../intel/liveNews';
@@ -53,7 +54,10 @@ export class BrainV2 {
         this.aiRouter = new AiRouter(env);
         this.tools = new BrainTools(db, env);
         this.groqProvider = new GroqProvider(env);
+        this.agency = new AgencySystem(db, env);
     }
+
+    private agency: AgencySystem;
 
     async handleMessage(userId: string, senderName: string, text: string, chatId?: string): Promise<string | HawasResponse> {
         const aiEnabled = await this.isAiEnabled(userId);
@@ -123,7 +127,19 @@ export class BrainV2 {
         const plan = await this.planner.createPlan(nluResult, userId);
         if (plan) return this.formatPlanResponse(plan, senderName);
 
-        // Priority 4: Agentic Two-Pass Reasoning (NEW!)
+        // Priority 4: Autonomous Agency (NEW!)
+        const agencyKeywords = ["اعمل خطة", "مهمة", "ابحث وقولي", "تخطيط", "mission", "plan", "research everything"];
+        const isMission = agencyKeywords.some(kw => text.toLowerCase().includes(kw)) || text.length > 100;
+
+        if (aiEnabled && withinQuota && isMission) {
+            const agencyRes = await this.agency.undertakeMission(userId, text, senderNameForAI);
+            return {
+                text: agencyRes.text,
+                taskId: agencyRes.taskId
+            };
+        }
+
+        // Priority 5: Agentic Two-Pass Reasoning
         if (aiEnabled && withinQuota) {
             try {
                 const agenticResponse = await this.agenticTwoPassReasoning(userId, senderName, text);
@@ -257,6 +273,7 @@ export class BrainV2 {
         await this.updateAiDiag(userId, {
             text: responderResult.text,
             provider: responderResult.provider || 'Groq',
+            model: responderResult.model || 'unknown',
             latencyMs: totalLatency,
             status: responderResult.status || 200,
             error: responderResult.error
@@ -610,5 +627,9 @@ export class BrainV2 {
             summary += `• **${f.key}**: ${f.value} (${(f.confidence * 100).toFixed(0)}%) - ${date}\n`;
         }
         return summary;
+    }
+
+    public async runAgencyLoop(taskId: string, userId: string): Promise<void> {
+        await this.agency.executeAutonomousLoop(taskId, userId);
     }
 }

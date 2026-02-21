@@ -26,7 +26,7 @@ import { IntelFormatter } from './intel/formatter';
 import { getPolySettings, setPolySettings } from './polyAgent/state';
 
 export default {
-    async fetch(request: Request, env: Env): Promise<Response> {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         try {
             const url = new URL(request.url);
             const normalizedPath = url.pathname.replace(/\/$/, '');
@@ -94,18 +94,36 @@ export default {
                 return new Response('Success! Return to Telegram.');
             }
 
-            // 4. Telegram Webhook
-            if (request.method === 'POST') {
-                const update = await request.json() as TelegramUpdate;
-                if (update.message || update.callback_query) {
-                    const chatId = update.message?.chat.id || update.callback_query?.message?.chat.id;
-                    const userId = update.message?.from.id || update.callback_query?.from.id;
-                    const messageThreadId = update.message?.message_thread_id || update.callback_query?.message?.message_thread_id;
-                    const text = update.message?.text || update.message?.caption || update.callback_query?.data || "";
-                    const senderName = update.message?.from.first_name || update.callback_query?.from.first_name || "User";
-                    const isOwner = userId?.toString() === env.OWNER_TELEGRAM_ID;
+            // 4. Telegram Webhook (RESTORED)
+            if (url.pathname === '/telegram' && request.method === 'POST') {
+                try {
+                    const update: any = await request.json();
 
-                    // 0. Track User
+                    let chatId: number | undefined;
+                    let userId: number | undefined;
+                    let senderName: string = 'User';
+                    let text: string = '';
+                    let messageThreadId: number | undefined;
+
+                    if (update.message) {
+                        chatId = update.message.chat.id;
+                        userId = update.message.from?.id;
+                        senderName = update.message.from?.first_name || 'Hustler';
+                        text = update.message.text || update.message.caption || '';
+                        messageThreadId = update.message.message_thread_id;
+                    } else if (update.callback_query) {
+                        chatId = update.callback_query.message?.chat.id;
+                        userId = update.callback_query.from?.id;
+                        senderName = update.callback_query.from?.first_name || 'Hustler';
+                        text = update.callback_query.data || '';
+                        messageThreadId = update.callback_query.message?.message_thread_id;
+                    }
+
+                    if (!userId || !chatId) return new Response('OK'); // No user or chat ID, ignore
+
+                    const isOwner = userId.toString() === env.OWNER_TELEGRAM_ID;
+
+                    // 0. Track User (UserManager)
                     if (update.message?.from || update.callback_query?.from) {
                         const tgUser = (update.message?.from || update.callback_query?.from)!;
                         const um = new UserManager(env.DB);
@@ -212,7 +230,6 @@ export default {
                                     }
                                 }
                             } else if (command === '/connect') {
-                                // Ensure userId is treated as number
                                 const uid = Number(userId);
                                 if (!uid) return new Response('Invalid User ID', { status: 400 });
 
@@ -353,7 +370,6 @@ export default {
                                 } else {
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, `⏳ جاري البحث والتحضير عن: **${args}**...`, { parse_mode: 'Markdown' });
                                     const brain = new BrainV2(env.DB, env);
-                                    // Use deepResearch or specific news flow
                                     const news = await brain.handleMessage(userId.toString(), senderName, `انشر خبر عن ${args}`, chatId.toString());
                                     const newsText = typeof news === 'string' ? news : news.text;
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, `📢 **خبر هام من حواس:**\n\n${newsText}`, { parse_mode: 'Markdown' });
@@ -389,7 +405,7 @@ export default {
                                 await sendTelegramMessage(env.BOT_TOKEN, chatId, "✅ Whale Trading is now **OFF**.");
                             }
                         } else {
-                            // 4. Agency Filtering (Groups Only)
+                            // Group filtering logic
                             const chatType = update.message?.chat?.type;
                             const isGroup = chatType === 'group' || chatType === 'supergroup';
                             const isReplyToMe = update.message?.reply_to_message?.from?.id.toString() === env.BOT_TOKEN.split(':')[0];
@@ -414,22 +430,19 @@ export default {
                             }
 
                             const result = await brain.handleMessage(userId.toString(), senderName, text, chatId.toString());
+
+                            // Trigger Agency Background Loop if needed
+                            if (typeof result !== 'string' && result.taskId) {
+                                ctx.waitUntil(brain.runAgencyLoop(result.taskId, userId.toString()));
+                            }
+
                             if (result) {
                                 if (typeof result === 'string') {
-                                    const manifesto = new AgentManifesto(env);
-                                    const systemSuffix = await manifesto.getSystemPromptSuffix();
-
-                                    // Inject strict rules into the brain context
-                                    // Note: This assumes BrainV2 has a way to accept system prompts or we append it to the message.
-                                    // For now, we prepend it to the context implicitly if the Brain supports it, 
-                                    // or just respect it in the logic we build next.
-
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, result, {
                                         reply_markup: isOwner ? getMainMenu() : undefined,
                                         message_thread_id: messageThreadId
                                     });
                                 } else {
-                                    // HawasResponse object
                                     const replyMarkup = result.reply_markup || (isOwner ? getMainMenu() : undefined);
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, result.text, {
                                         reply_markup: replyMarkup,
@@ -440,12 +453,24 @@ export default {
                         }
                     }
                     return new Response('OK');
+                } catch (e: any) {
+                    console.error('Telegram Handler Error:', e);
+                    try {
+                        const ownerId = parseInt(env.OWNER_TELEGRAM_ID || '0');
+                        if (ownerId && env.BOT_TOKEN) {
+                            await sendTelegramMessage(env.BOT_TOKEN, ownerId, `⚠️ **خطأ في المعالجة:**\n\`${e.message}\``);
+                        }
+                        await env.DB.prepare("INSERT INTO poly_audit (action_type, details, timestamp) VALUES (?, ?, ?)").bind('ERROR', JSON.stringify({ error: e.message, stack: e.stack }), Date.now()).run();
+                    } catch (logErr) {
+                        console.error('Failed to report/log error:', logErr);
+                    }
+                    return new Response('OK');
                 }
             }
 
             return new Response('Not Found', { status: 404 });
         } catch (e: any) {
-            console.error('Worker Error:', e);
+            console.error('Worker General Error:', e);
             return new Response(`Error: ${e.message}`, { status: 500 });
         }
     },
@@ -454,6 +479,7 @@ export default {
         try {
             const ownerId = parseInt(env.OWNER_TELEGRAM_ID || '0');
 
+            // 1. Daily Digest
             if (event.cron === "0 9 * * *") {
                 const agentMemory = new AgentMemorySystem(env.DB, env);
                 const digest = await agentMemory.generateDailyDigest();
@@ -462,7 +488,7 @@ export default {
                 }
             }
 
-            // 12h Intelligence Report
+            // 2. 12h Intelligence Report
             if (event.cron === "0 */12 * * *") {
                 const intel = await LiveNews.fetchLatest(true);
                 if (intel && ownerId) {
@@ -470,47 +496,33 @@ export default {
                     await sendTelegramMessage(env.BOT_TOKEN, ownerId, `📊 **تحديث استخباراتي (12h)**\n\n${report}`, { parse_mode: 'Markdown' });
                 }
             }
-        } catch (e) {
-            console.error('Scheduled Error:', e);
-        }
 
-        // PolyAgent Scan (Every 5 mins)
-        // Note: We check if it's NOT the daily digest (or just run it safely with locking)
-        if (event.cron !== "0 9 * * *") {
-            try {
+            // 3. PolyAgent Scan (Every 5 mins)
+            if (event.cron !== "0 9 * * *") {
                 const poly = new PolyAgent(env);
                 const settings = await poly.db.getSettings();
 
-                // Only scan if not OFF
                 if (settings.mode !== 'OFF') {
-                    // Try to acquire lock to prevent double-runs
-                    const locked = await poly.db.acquireLock('scan_lock', 'worker', 250000); // 4 min lock
+                    const locked = await poly.db.acquireLock('scan_lock', 'worker', 250000);
                     if (locked) {
                         const opps = await poly.scanner.scan();
                         if (opps.length > 0) {
                             const msg = opps.map(o => `💰 **${o.mispricing_pct.toFixed(1)}%** | ${o.question}\n${o.details}`).join('\n\n');
-
                             if (settings.mode === 'EXECUTE') {
-                                // Start execution flow (generate OTP)
                                 const otp = poly.generateOtp();
-                                const payload = { type: 'BUY_ARB', opps }; // simplified payload
-                                await poly.db.createOp(otp, payload);
-                                const ownerId = parseInt(env.OWNER_TELEGRAM_ID || '0');
+                                await poly.db.createOp(otp, { type: 'BUY_ARB', opps });
                                 if (ownerId) await sendTelegramMessage(env.BOT_TOKEN, ownerId, `🚀 **Action Required**\n\n${msg}\n\nReply: \`/poly_confirm ${otp}\``, { parse_mode: 'Markdown' });
                             } else {
-                                // OBSERVE only
-                                const ownerId = parseInt(env.OWNER_TELEGRAM_ID || '0');
                                 if (ownerId) await sendTelegramMessage(env.BOT_TOKEN, ownerId, `👀 **Observation**\n\n${msg}`, { parse_mode: 'Markdown' });
                             }
                             await poly.db.logAudit('ALERT', { opps, mode: settings.mode });
                         }
-                        // Release lock not strictly needed if we rely on expiry, but good practice
                         await poly.db.releaseLock('scan_lock', 'worker');
                     }
                 }
-            } catch (e) {
-                console.error('PolyAgent Cron Error:', e);
             }
+        } catch (e) {
+            console.error('Scheduled Error:', e);
         }
     }
 };

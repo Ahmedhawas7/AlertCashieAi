@@ -8,17 +8,14 @@ export interface Env {
     DEFAULT_GROUP_MODE: string;
     DEFAULT_GROUP_LANG: string;
     GEMINI_API_KEY?: string;
+    GEMINI_MODEL?: string;
     DEEPSEEK_API_KEY?: string;
     DEEPSEEK_BASE_URL?: string;
+    DEEPSEEK_MODEL?: string;
     AI_ENABLED_DEFAULT?: string;
     AI_DAILY_LIMIT?: string;
     AI_MAX_TOKENS?: string;
     AI_TIMEOUT_MS?: string;
-    GROQ_API_KEY?: string;
-    GROQ_BASE_URL?: string;
-    GROQ_MODEL?: string;
-    OPENROUTER_API_KEY?: string;
-    OPENROUTER_BASE_URL?: string;
     OPENROUTER_MODEL?: string;
 
     // Groq Multi-Model Configuration
@@ -159,6 +156,7 @@ export interface HawasResponse {
     text: string;
     method?: 'sendMessage' | 'reply'; // default reply
     reply_markup?: any;
+    taskId?: string;
 }
 
 // Cloudflare Workers types
