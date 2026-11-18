@@ -25,6 +25,7 @@ import { IntelFormatter } from './intel/formatter';
 import { AlertService } from './intel/alerts';
 import { ProactiveMonitor } from './intel/proactiveMonitor';
 import { GeminiProvider } from './ai/providers/gemini';
+import { ProactiveCompanion } from './agent/proactiveCompanion';
 
 // ✅ PolyAgent (MVP)
 import { getPolySettings, setPolySettings } from './polyAgent/state';
@@ -198,18 +199,68 @@ export default {
                     const change = entry?.changes?.[0]?.value;
                     const message = change?.messages?.[0];
 
-                    if (message && message.type === 'text') {
+                    if (message) {
                         const fromPhone = message.from; // e.g. "201012345678"
-                        const incomingText = message.text?.body || '';
                         const contactName = change?.contacts?.[0]?.profile?.name || 'User';
-
                         const brain = new BrainV2(env.DB, env);
-                        const result = await brain.handleMessage(fromPhone, contactName, incomingText, fromPhone, 'web');
-                        const replyText = typeof result === 'string' ? result : result.text;
-                        const cleanReply = replyText.replace(/<[^>]+>/g, '');
 
-                        if (env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
-                            await sendWhatsAppMessage(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_PHONE_NUMBER_ID, fromPhone, cleanReply);
+                        // 1. Text Message
+                        if (message.type === 'text') {
+                            const incomingText = message.text?.body || '';
+                            const result = await brain.handleMessage(fromPhone, contactName, incomingText, fromPhone, 'web');
+                            const replyText = typeof result === 'string' ? result : result.text;
+                            const cleanReply = replyText.replace(/<[^>]+>/g, '');
+
+                            if (env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
+                                await sendWhatsAppMessage(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_PHONE_NUMBER_ID, fromPhone, cleanReply);
+                            }
+                        }
+                        // 2. Image Message (Gemini Multimodal Vision Analysis)
+                        else if (message.type === 'image' && message.image?.id && env.GEMINI_API_KEY && env.WHATSAPP_ACCESS_TOKEN) {
+                            try {
+                                const media = await downloadWhatsAppMedia(env.WHATSAPP_ACCESS_TOKEN, message.image.id);
+                                if (media) {
+                                    const gemini = new GeminiProvider(env);
+                                    const caption = (message.image?.caption || '').trim();
+                                    const uName = await brain.memory.getFact(fromPhone, 'name');
+                                    const uGender = await brain.memory.getFact(fromPhone, 'gender');
+                                    const isFemale = uGender?.value === 'female';
+                                    const registeredName = uName?.value || '';
+
+                                    const prompt = caption
+                                        ? `أنت "حواس" الصديق المصري الذكي ابن البلد. صديقك ${registeredName ? `(${registeredName})` : (isFemale ? '(صديقة طيبة)' : '(صاحب وجدع)')} باعتلك الصورة دي وبيقولك: "${caption}". علق عليها بذكاء وخفة دم مصرية وملاحظة واعية في سطرين:`
+                                        : `أنت "حواس" الصديق المصري الذكي ابن البلد. صديقك ${registeredName ? `(${registeredName})` : (isFemale ? '(صديقة طيبة)' : '(صاحب وجدع)')} باعتلك الصورة دي. علق عليها بملاحظة ذكية وإفيه خفيف ومحترم في سطرين يفتح نفسه:`;
+
+                                    const analysis = await gemini.analyzeImage(media.buffer, media.mimeType, prompt);
+                                    if (analysis && env.WHATSAPP_PHONE_NUMBER_ID) {
+                                        await sendWhatsAppMessage(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_PHONE_NUMBER_ID, fromPhone, analysis.replace(/<[^>]+>/g, ''));
+                                    }
+                                }
+                            } catch (imgErr) {
+                                console.error('WhatsApp Image Analysis Error:', imgErr);
+                            }
+                        }
+                        // 3. Audio / Voice Message (Voice transcription & brain loop)
+                        else if ((message.type === 'audio' || message.type === 'voice') && (message.audio?.id || message.voice?.id) && env.GEMINI_API_KEY && env.WHATSAPP_ACCESS_TOKEN) {
+                            try {
+                                const mediaId = message.audio?.id || message.voice?.id;
+                                const media = await downloadWhatsAppMedia(env.WHATSAPP_ACCESS_TOKEN, mediaId);
+                                if (media) {
+                                    const gemini = new GeminiProvider(env);
+                                    const transcribed = await gemini.transcribe(media.buffer, media.mimeType || 'audio/ogg');
+                                    if (transcribed) {
+                                        const result = await brain.handleMessage(fromPhone, contactName, transcribed, fromPhone, 'web');
+                                        const replyText = typeof result === 'string' ? result : result.text;
+                                        const cleanReply = replyText.replace(/<[^>]+>/g, '');
+
+                                        if (env.WHATSAPP_PHONE_NUMBER_ID) {
+                                            await sendWhatsAppMessage(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_PHONE_NUMBER_ID, fromPhone, cleanReply);
+                                        }
+                                    }
+                                }
+                            } catch (voiceErr) {
+                                console.error('WhatsApp Voice Note Error:', voiceErr);
+                            }
                         }
                     }
                     return new Response('EVENT_RECEIVED', { status: 200 });
@@ -713,6 +764,20 @@ export default {
                 console.error('Scheduled Diary Error:', diaryErr);
             }
 
+            // 6. Hawas Proactive Morning Companion Check-ins (09:00 UTC = 11:00 AM Cairo)
+            if (event.cron === "0 9 * * *") {
+                try {
+                    const companion = new ProactiveCompanion(env.DB, env);
+                    await companion.runMorningCheckins(async (to, msg) => {
+                        if (env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
+                            await sendWhatsAppMessage(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_PHONE_NUMBER_ID, to, msg);
+                        }
+                    });
+                } catch (companionErr) {
+                    console.error('Proactive Companion Checkins Error:', companionErr);
+                }
+            }
+
             // 3. PolyAgent Scan (Every 5 mins)
             if (event.cron !== "0 9 * * *") {
                 const poly = new PolyAgent(env);
@@ -812,5 +877,26 @@ async function sendWhatsAppMessage(token: string, phoneId: string, to: string, t
         }
     } catch (err) {
         console.error('sendWhatsAppMessage error:', err);
+    }
+}
+
+async function downloadWhatsAppMedia(token: string, mediaId: string): Promise<{ buffer: ArrayBuffer, mimeType: string } | null> {
+    try {
+        const urlRes = await fetch(`https://graph.facebook.com/v21.0/${mediaId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!urlRes.ok) return null;
+        const meta: any = await urlRes.json();
+        if (!meta.url) return null;
+
+        const fileRes = await fetch(meta.url, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!fileRes.ok) return null;
+        const buffer = await fileRes.arrayBuffer();
+        return { buffer, mimeType: meta.mime_type || 'image/jpeg' };
+    } catch (e) {
+        console.error('downloadWhatsAppMedia error:', e);
+        return null;
     }
 }

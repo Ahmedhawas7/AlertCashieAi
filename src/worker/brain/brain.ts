@@ -30,7 +30,7 @@ export class BrainV2 {
     private db: D1Database;
     private env: Env;
     private nlu: NLUParser;
-    private memory: MemoryManager;
+    public memory: MemoryManager;
     private kb: KnowledgeBase;
     private retrieval: RetrievalEngine;
     private planner: Planner;
@@ -460,7 +460,7 @@ export class BrainV2 {
                     if (args.quantity && !args.amount) args.amount = args.quantity;
                     return { toolName: tool, args };
                 }
-            } catch {}
+            } catch { }
         }
 
         // 2. Bracket or function call: [ paper_buy({"quantity":0.2}) ] or paper_buy(...)
@@ -472,7 +472,7 @@ export class BrainV2 {
             if (rawArgs.startsWith('{') && rawArgs.endsWith('}')) {
                 try {
                     args = JSON.parse(rawArgs);
-                } catch {}
+                } catch { }
             }
             if (args.quantity && !args.amount) args.amount = args.quantity;
             if (!args.symbol && !args.asset) {
@@ -560,7 +560,7 @@ export class BrainV2 {
         // 3. PRESENCE CHECK SAFEGUARD: Prevent unprompted melodrama on simple name calls
         const isSimplePresence = intent === 'presence_check' || /^(حواس|يا حواس)$/i.test(userPrompt.trim());
         if (isSimplePresence && /(يا عيون حواس|يا قلب حواس|الفراق بيوجع|الوجع تقيل|خدي وقتك في الحزن)/i.test(refined)) {
-            refined = isFemale 
+            refined = isFemale
                 ? "أيوا يا ستي معاكِ وسامعك أهو بكل تركيز.. خير يا رب، طمنيني عنك؟"
                 : "أيوا يا بطل معاك وسامعك أهو بكل تركيز.. خير يا غالي، طمني عنك؟";
         }
@@ -681,7 +681,7 @@ export class BrainV2 {
     private async packageAiContext(userId: string, text: string, chatId?: string): Promise<string> {
         const facts = await this.db.prepare("SELECT key, value FROM user_memory WHERE user_id = ? ORDER BY updated_at DESC LIMIT 12").bind(userId).all<{ key: string, value: string }>();
         const memoryContext = (facts.results || []).map(f => `- ${f.key}: ${f.value}`).join("\n");
-        
+
         // Deep conversation continuity: 10 past turns to understand thread progression flawlessly
         const history = await this.db.prepare("SELECT text, outcome FROM episodic_logs WHERE user_id = ? ORDER BY ts DESC LIMIT 10").bind(userId).all<{ text: string, outcome: string }>();
         const historyContext = (history.results || []).reverse().map(h => `المستخدم: ${h.text}\nحواس: ${h.outcome}`).join("\n\n");

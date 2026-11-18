@@ -154,13 +154,17 @@ export class GeminiProvider {
     }
 
     /**
-     * Analyze image (charts, screenshots) using Gemini 1.5 Flash Vision.
+     * Analyze image (charts, screenshots, personal photos, food, views) using Gemini Vision.
      */
     async analyzeImage(imageData: ArrayBuffer, mimeType: string, customPrompt?: string): Promise<string> {
         if (!this.apiKey) throw new Error('GEMINI_API_KEY missing');
 
-        const model = 'gemini-1.5-flash';
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+        const candidates = [
+            this.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
+            'gemini-3.5-flash-lite',
+            'gemini-flash-lite-latest',
+            'gemini-3.8-flash'
+        ];
 
         const uint8 = new Uint8Array(imageData);
         let binary = '';
@@ -169,33 +173,43 @@ export class GeminiProvider {
         }
         const base64 = btoa(binary);
 
-        const prompt = customPrompt || "أنت حواس - خبير التحليل الفني والأسواق. حلل هذا الشارت أو الصورة الفنية بعمق: استخرج اسم العملة والزوج إن وُجد، الإطار الزمني، الاتجاه العام، مناطق الدعم والمقاومة الحالية، النماذج الفنية، واقترح استراتيجية تداول ذكية بنقاط دخول وخروج واضحة بأسلوبك المصري الذكي والواعي.";
+        const prompt = customPrompt || "أنت 'حواس' — الصديق المصري الذكي خفيف الدم والأصيل. بص على الصورة دي وعلق عليها بأسلوبك المصري التلقائي، السريع البديهة والذكي: لو فيها أكل أو قهوة سمّي وهزر معاه، لو فيها شارت أو مسألة فسرها باحتراف، ولو منظر أو لقطة عفوية شاركه إحساسك وقفشة حلوة تفتح نفسه في سطرين أو ثلاثة!";
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{
-                    parts: [
-                        { text: prompt },
-                        {
-                            inline_data: {
-                                mime_type: mimeType,
-                                data: base64
-                            }
-                        }
-                    ]
-                }]
-            })
-        });
+        let lastErr = '';
+        for (const model of candidates) {
+            try {
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                {
+                                    inline_data: {
+                                        mime_type: mimeType,
+                                        data: base64
+                                    }
+                                }
+                            ]
+                        }]
+                    })
+                });
 
-        if (!response.ok) {
-            const err = await response.text();
-            throw new Error(`Gemini image analysis failed: ${err}`);
+                if (response.ok) {
+                    const data: any = await response.json();
+                    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                    if (text) return text;
+                } else {
+                    lastErr = await response.text();
+                }
+            } catch (e: any) {
+                lastErr = e.message;
+            }
         }
 
-        const data: any = await response.json();
-        return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        throw new Error(`Gemini image analysis failed: ${lastErr}`);
     }
 }
 
