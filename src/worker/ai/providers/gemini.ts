@@ -37,10 +37,11 @@ export class GeminiProvider {
         }
 
         const candidates = [
-            this.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
-            'gemini-3.5-flash-lite',
+            'gemini-3-flash-preview',
+            'gemini-flash-latest',
             'gemini-flash-lite-latest',
-            'gemini-3.8-flash'
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite'
         ];
 
         let lastError = '';
@@ -79,9 +80,9 @@ export class GeminiProvider {
 
                 if (!response.ok) {
                     const err = await response.text();
-                    lastError = err.substring(0, 200);
+                    lastError += ` [${model}:${response.status}] ${err.substring(0, 120)}`;
                     lastStatus = response.status;
-                    console.warn(`Gemini model ${model} failed (${response.status}: ${lastError}). Trying next model...`);
+                    console.warn(`Gemini model ${model} failed (${response.status}: ${err}). Trying next model...`);
                     continue;
                 }
 
@@ -93,10 +94,23 @@ export class GeminiProvider {
                 }
             } catch (e: any) {
                 clearTimeout(timer);
-                lastError = e.message;
+                lastError += ` [${model}:ex] ${e.message}`;
                 lastStatus = e.name === 'AbortError' ? 408 : 500;
                 console.warn(`Gemini model ${model} exception (${e.message}). Trying next model...`);
             }
+        }
+
+        let availableModels = '';
+        try {
+            const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`);
+            const listData: any = await listRes.json();
+            if (listData?.models) {
+                availableModels = ' Available: ' + listData.models.map((m: any) => m.name.replace('models/', '')).filter((n: string) => n.includes('flash') || n.includes('pro') || n.includes('gemini')).slice(0, 10).join(', ');
+            } else if (listData?.error) {
+                availableModels = ' Key error: ' + listData.error.message;
+            }
+        } catch (e: any) {
+            availableModels = ' List err: ' + e.message;
         }
 
         return {
@@ -105,7 +119,7 @@ export class GeminiProvider {
             model: candidates[0],
             latencyMs: 0,
             status: lastStatus,
-            error: lastError
+            error: lastError + availableModels
         };
     }
 
@@ -115,7 +129,7 @@ export class GeminiProvider {
     async transcribe(audioData: ArrayBuffer, mimeType: string): Promise<string> {
         if (!this.apiKey) throw new Error('GEMINI_API_KEY missing');
 
-        const model = 'gemini-1.5-flash';
+        const model = this.env.GEMINI_MODEL || 'gemini-2.5-flash';
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
 
         // Convert ArrayBuffer to Base64
@@ -160,10 +174,11 @@ export class GeminiProvider {
         if (!this.apiKey) throw new Error('GEMINI_API_KEY missing');
 
         const candidates = [
-            this.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
-            'gemini-3.5-flash-lite',
+            'gemini-3-flash-preview',
+            'gemini-flash-latest',
             'gemini-flash-lite-latest',
-            'gemini-3.8-flash'
+            'gemini-2.5-flash',
+            'gemini-2.5-flash-lite'
         ];
 
         const uint8 = new Uint8Array(imageData);

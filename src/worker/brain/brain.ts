@@ -89,11 +89,8 @@ export class BrainV2 {
                     return await this.generateDailyDiary(userId);
                 }
 
-                // If owner on Telegram asking for debug, show error
-                if (source === 'telegram' && userId === this.env.OWNER_TELEGRAM_ID && text.includes('/diag')) {
-                    const nluResult = this.nlu.parse(text);
-                    const offlineFallback = await this.getOfflineResponse(userId, senderName, text, nluResult);
-                    return `⚠️ (AI Error: ${err.message})\n\n${offlineFallback}`;
+                if (text.includes('/diag')) {
+                    return `⚠️ (AI Error: ${err.message})`;
                 }
 
                 // Gender-aware graceful fallback
