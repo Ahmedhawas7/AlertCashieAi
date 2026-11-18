@@ -1,16 +1,27 @@
-FROM node:18-slim
+FROM node:20-slim
 
-WORKDIR /app
+# Create user with UID 1000 for Hugging Face Spaces security
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-RUN apt-get update && apt-get install -y curl sqlite3 python3 make g++ && rm -rf /var/lib/apt/lists/*
+WORKDIR $HOME/app
 
-COPY package*.json ./
-RUN npm ci
+# Install dependencies
+COPY --chown=user package*.json ./
+RUN npm install --omit=dev
 
-COPY . .
-RUN npx prisma generate
-RUN npm run build
+# Copy application files
+COPY --chown=user . .
 
-EXPOSE 3000
+# Ensure session directory exists and is writable
+RUN mkdir -p /home/user/app/data/whatsapp_session
 
-CMD ["sh", "-c", "npx prisma db push && npm start"]
+# Hugging Face Spaces port is 7860
+EXPOSE 7860
+ENV PORT=7860
+ENV HAWAS_API_URL=https://hawas-worker.hawas-alertai.workers.dev/api/chat
+ENV SESSION_DIR=/home/user/app/data/whatsapp_session
+
+CMD ["node", "scripts/whatsapp-bridge.js"]
