@@ -67,13 +67,13 @@ export class WhaleExecutor {
 
         // 2. Perform Swap (Simplified ExactInputSingle for Uniswap V3)
         // Note: Real implementation needs path and tick-spacing
-        // In v1, we log the intent.
-        return { success: true, hash: approveHash, note: "Approved. Ready for Swap V2" };
+        // Currently only doing approval logic.
+        return { success: true, hash: approveHash, note: "Approved router. Swap logic pending implementation." };
     }
 
     async sellToken(tokenAddress: `0x${string}`, amount: string) {
         console.log(`[Whale] Selling ${amount} of ${tokenAddress}`);
         // Approval and Swap logic mirror buy but reversed
-        return { success: true, hash: '0x0', note: "Sell executed (mocked swap)" };
+        throw new Error("Sell execution is not fully implemented in V1 logic yet.");
     }
 }

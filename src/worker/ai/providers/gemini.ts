@@ -36,58 +36,166 @@ export class GeminiProvider {
             };
         }
 
-        const start = Date.now();
-        const model = this.env.GEMINI_MODEL || 'gemini-1.5-flash';
-        const timeout = parseInt(this.env.AI_TIMEOUT_MS || '15000');
+        const candidates = [
+            this.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
+            'gemini-3.5-flash-lite',
+            'gemini-flash-lite-latest',
+            'gemini-3.8-flash'
+        ];
 
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeout);
+        let lastError = '';
+        let lastStatus = 500;
 
-        try {
-            // Convert messages to Gemini format
-            const contents = messages.map(m => ({
-                role: m.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: m.content }]
-            }));
+        for (const model of candidates) {
+            const start = Date.now();
+            const timeout = parseInt(this.env.AI_TIMEOUT_MS || '15000');
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeout);
 
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+            try {
+                // Convert messages to Gemini format
+                const contents = messages.map(m => ({
+                    role: m.role === 'assistant' ? 'model' : 'user',
+                    parts: [{ text: m.content }]
+                }));
 
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents,
-                    generationConfig: {
-                        temperature: options?.temperature ?? 0.7,
-                        maxOutputTokens: options?.maxTokens ?? 1000,
-                    }
-                }),
-                signal: controller.signal
-            });
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
 
-            clearTimeout(timer);
-            const latency = Date.now() - start;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents,
+                        generationConfig: {
+                            temperature: options?.temperature ?? 0.7,
+                            maxOutputTokens: options?.maxTokens ?? 1000,
+                        }
+                    }),
+                    signal: controller.signal
+                });
 
-            if (!response.ok) {
-                const err = await response.text();
-                return { text: '', provider: 'Gemini', model, latencyMs: latency, status: response.status, error: err.substring(0, 200) };
+                clearTimeout(timer);
+                const latency = Date.now() - start;
+
+                if (!response.ok) {
+                    const err = await response.text();
+                    lastError = err.substring(0, 200);
+                    lastStatus = response.status;
+                    console.warn(`Gemini model ${model} failed (${response.status}: ${lastError}). Trying next model...`);
+                    continue;
+                }
+
+                const data: any = await response.json();
+                const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+                if (text) {
+                    return { text, provider: 'Gemini', model, latencyMs: latency, status: 200 };
+                }
+            } catch (e: any) {
+                clearTimeout(timer);
+                lastError = e.message;
+                lastStatus = e.name === 'AbortError' ? 408 : 500;
+                console.warn(`Gemini model ${model} exception (${e.message}). Trying next model...`);
             }
-
-            const data: any = await response.json();
-            const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-            return { text, provider: 'Gemini', model, latencyMs: latency, status: 200 };
-
-        } catch (e: any) {
-            clearTimeout(timer);
-            return {
-                text: '',
-                provider: 'Gemini',
-                model,
-                latencyMs: Date.now() - start,
-                status: e.name === 'AbortError' ? 408 : 500,
-                error: e.message
-            };
         }
+
+        return {
+            text: '',
+            provider: 'Gemini',
+            model: candidates[0],
+            latencyMs: 0,
+            status: lastStatus,
+            error: lastError
+        };
+    }
+
+    /**
+     * Transcribe audio data using Gemini 1.5 Flash.
+     */
+    async transcribe(audioData: ArrayBuffer, mimeType: string): Promise<string> {
+        if (!this.apiKey) throw new Error('GEMINI_API_KEY missing');
+
+        const model = 'gemini-1.5-flash';
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+
+        // Convert ArrayBuffer to Base64
+        const uint8 = new Uint8Array(audioData);
+        let binary = '';
+        for (let i = 0; i < uint8.byteLength; i++) {
+            binary += String.fromCharCode(uint8[i]);
+        }
+        const base64 = btoa(binary);
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: "Please transcribe this audio exactly as spoken." },
+                        {
+                            inline_data: {
+                                mime_type: mimeType,
+                                data: base64
+                            }
+                        }
+                    ]
+                }]
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(`Gemini transcription failed: ${err}`);
+        }
+
+        const data: any = await response.json();
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    }
+
+    /**
+     * Analyze image (charts, screenshots) using Gemini 1.5 Flash Vision.
+     */
+    async analyzeImage(imageData: ArrayBuffer, mimeType: string, customPrompt?: string): Promise<string> {
+        if (!this.apiKey) throw new Error('GEMINI_API_KEY missing');
+
+        const model = 'gemini-1.5-flash';
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+
+        const uint8 = new Uint8Array(imageData);
+        let binary = '';
+        for (let i = 0; i < uint8.byteLength; i++) {
+            binary += String.fromCharCode(uint8[i]);
+        }
+        const base64 = btoa(binary);
+
+        const prompt = customPrompt || "أنت حواس - خبير التحليل الفني والأسواق. حلل هذا الشارت أو الصورة الفنية بعمق: استخرج اسم العملة والزوج إن وُجد، الإطار الزمني، الاتجاه العام، مناطق الدعم والمقاومة الحالية، النماذج الفنية، واقترح استراتيجية تداول ذكية بنقاط دخول وخروج واضحة بأسلوبك المصري الذكي والواعي.";
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: prompt },
+                        {
+                            inline_data: {
+                                mime_type: mimeType,
+                                data: base64
+                            }
+                        }
+                    ]
+                }]
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(`Gemini image analysis failed: ${err}`);
+        }
+
+        const data: any = await response.json();
+        return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     }
 }
+

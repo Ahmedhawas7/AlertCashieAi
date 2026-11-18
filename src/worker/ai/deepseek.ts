@@ -1,5 +1,5 @@
 import { Env } from '../types';
-import { SYSTEM_PROMPT_EGYPT } from './systemPrompt';
+import { RESPONDER_SYSTEM_PROMPT_EGYPT as SYSTEM_PROMPT_EGYPT } from './systemPrompt';
 
 /**
  * DeepSeek Chat Client

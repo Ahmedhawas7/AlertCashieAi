@@ -2,13 +2,7 @@ import { Env, ExecutionContext } from '../types';
 import { AiRouter } from '../ai/router';
 import { MemoryManager } from './memory';
 import { BrainTools } from './tools';
-
-export interface AgentTask {
-    id: string;
-    goal: string;
-    status: 'PENDING' | 'PLANNING' | 'EXECUTING' | 'COMPLETED' | 'FAILED';
-    plan: any;
-}
+import { TaskEngine, AgentTask, AgentStep } from '../agent/tasks';
 
 export class AgencySystem {
     private db: D1Database;
@@ -29,15 +23,14 @@ export class AgencySystem {
      * Main entry point for autonomous mission execution
      */
     async undertakeMission(userId: string, goal: string, senderName: string): Promise<{ text: string, taskId: string }> {
-        const taskId = crypto.randomUUID();
+        const engine = new TaskEngine(this.db);
+        const steps: AgentStep[] = [
+            { id: crypto.randomUUID(), description: 'جاري التخطيط والتحليل...', status: 'pending' }
+        ];
 
-        // 1. Initial Persona Response (Human-like)
-        const acknowledgment = `يا هلا يا ${senderName}! أنا فهمت قصدك.. خليني أفكر في "<b>${goal}</b>" وأشوف أقدر أساعدك إزاي. هعمل لك خطة دلوقتي ونبدأ التنفيذ فوراً. 🚀`;
+        const taskId = await engine.createTask(userId, goal, 'MISSION', steps);
 
-        // 2. Persistent Storage (Async Execution)
-        await this.db.prepare(
-            "INSERT INTO agent_tasks (id, user_id, goal, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
-        ).bind(taskId, userId, goal, 'PLANNING', Date.now(), Date.now()).run();
+        const acknowledgment = `يا هلا يا ${senderName}! أنا فهمت قصدك.. هبدأ أشتغل على "<b>${goal}</b>" وأبلغك بالتحديثات أول بأول. 🚀`;
 
         return { text: acknowledgment, taskId };
     }
@@ -47,42 +40,77 @@ export class AgencySystem {
      * This will be triggered in the background or after acknowledgment
      */
     async executeAutonomousLoop(taskId: string, userId: string): Promise<void> {
-        // Fetch task
-        const task = await this.db.prepare("SELECT * FROM agent_tasks WHERE id = ?").bind(taskId).first<any>();
+        const engine = new TaskEngine(this.db);
+        const task = await engine.getTask(taskId);
         if (!task) return;
 
         try {
+            await engine.updateProgress(taskId, 0, 'in_progress');
+
             // Step 1: Planning
-            const plan = await this.generatePlan(task.goal);
-            await this.db.prepare("UPDATE agent_tasks SET plan_json = ?, status = ?, updated_at = ? WHERE id = ?")
-                .bind(JSON.stringify(plan), 'EXECUTING', Date.now(), taskId).run();
+            const plan = await this.generatePlan(task.title);
+
+            // Rewrite Steps
+            const newSteps: AgentStep[] = plan.steps.map((s: any) => ({
+                id: crypto.randomUUID(),
+                description: s.description,
+                status: 'pending',
+                action: s.action,
+                params: s.params
+            }));
+
+            await this.db.prepare(
+                `UPDATE agent_tasks SET steps_json = ?, progress_total = ?, updated_at = ? WHERE id = ?`
+            ).bind(JSON.stringify(newSteps), newSteps.length, Date.now(), taskId).run();
 
             // Step 2: Sequential Execution
-            for (let i = 0; i < plan.steps.length; i++) {
-                const step = plan.steps[i];
-                const stepId = crypto.randomUUID();
+            for (let i = 0; i < newSteps.length; i++) {
+                await engine.updateProgress(taskId, i, 'in_progress');
+                await this.sendLiveUpdate(userId, taskId, engine);
 
-                await this.db.prepare(
-                    "INSERT INTO agent_steps (id, task_id, description, action, params_json, order_index, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                ).bind(stepId, taskId, step.description, step.action, JSON.stringify(step.params), i, 'RUNNING', Date.now(), Date.now()).run();
-
+                const step = newSteps[i];
                 const result = await this.executeStep(step);
 
-                await this.db.prepare("UPDATE agent_steps SET result_json = ?, status = ?, updated_at = ? WHERE id = ?")
-                    .bind(JSON.stringify(result), 'DONE', Date.now(), stepId).run();
+                if (result && result.error) {
+                    throw new Error(result.error);
+                }
+
+                await engine.updateProgress(taskId, i, 'completed', result);
             }
 
             // Step 3: Reflection & Memory Learning
-            await this.learnFromExperience(task.goal, plan);
-
-            await this.db.prepare("UPDATE agent_tasks SET status = ?, updated_at = ? WHERE id = ?")
-                .bind('COMPLETED', Date.now(), taskId).run();
+            await this.learnFromExperience(task.title, plan);
+            await this.sendLiveUpdate(userId, taskId, engine);
 
         } catch (e: any) {
             console.error('Agency Loop Error:', e);
-            await this.db.prepare("UPDATE agent_tasks SET status = ?, updated_at = ? WHERE id = ?")
-                .bind('FAILED', Date.now(), taskId).run();
+            const currentTask = await engine.getTask(taskId);
+            if (currentTask) {
+                const pendingIdx = currentTask.steps.findIndex(s => s.status === 'in_progress' || s.status === 'pending');
+                if (pendingIdx !== -1) {
+                    await engine.updateProgress(taskId, pendingIdx, 'failed', undefined, e.message);
+                } else {
+                    await this.db.prepare("UPDATE agent_tasks SET status = 'failed', error = ? WHERE id = ?").bind(e.message, taskId).run();
+                }
+                await this.sendLiveUpdate(userId, taskId, engine);
+            }
         }
+    }
+
+    private async sendLiveUpdate(userId: string, taskId: string, engine: TaskEngine) {
+        const task = await engine.getTask(taskId);
+        if (!task || !this.env.BOT_TOKEN) return;
+
+        const msg = engine.formatProgress(task);
+
+        const url = `https://api.telegram.org/bot${this.env.BOT_TOKEN}/sendMessage`;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: userId, text: msg, parse_mode: 'Markdown' })
+            });
+        } catch (e) { console.error("Live Update Error", e) }
     }
 
     private async generatePlan(goal: string): Promise<any> {
@@ -92,7 +120,6 @@ Output a JSON plan with an array of "steps". Each step has "description", "actio
 Actions: SEARCH, READ_URL, NEWS, MARKET_STATUS, ANALYZE_SENTIMENT, DRAFT_TX.`;
 
         const res = await this.router.generateReply('PLANNER', "وضع لي خطة تنفيذية للمهمة دي", "", sysPrompt);
-        // Extract JSON from response (naive for now)
         try {
             const match = res.text.match(/\{[\s\S]*\}/);
             return JSON.parse(match ? match[0] : res.text);
@@ -102,7 +129,6 @@ Actions: SEARCH, READ_URL, NEWS, MARKET_STATUS, ANALYZE_SENTIMENT, DRAFT_TX.`;
     }
 
     private async executeStep(step: any): Promise<any> {
-        // Map actions to tool execution
         switch (step.action) {
             case 'SEARCH':
                 return await this.tools.executeTool('freeai_search', { query: step.params.query });

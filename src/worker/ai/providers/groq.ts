@@ -3,9 +3,9 @@ import { Env } from '../../types';
 /**
  * Groq Provider with 3-Tier Fallback System
  * 
- * Tier 1: openai/gpt-oss-120b (Maximum Intelligence)
- * Tier 2: llama-3.3-70b-versatile (Reliable Backup)
- * Tier 3: llama-3.1-8b-instant (Emergency Fast Mode)
+ * Tier 1: deepseek-r1-distill-llama-70b (Top Intelligence / Reasoning)
+ * Tier 2: llama-3.3-70b-versatile (Reliable Versatile Model)
+ * Tier 3: llama-3.1-8b-instant (Fast / Low-cost Backup)
  */
 
 export interface GroqResult {
@@ -57,15 +57,15 @@ export class GroqProvider {
 
         const timeout = parseInt(this.env.AI_TIMEOUT_MS || '12000');
 
-        // Tier 1: Primary (Maximum Intelligence)
-        const primaryModel = this.env.GROQ_MODEL_PRIMARY || 'openai/gpt-oss-120b';
+        // Tier 1: Primary (Reliable, fast, excellent instruction follower)
+        const primaryModel = this.env.GROQ_MODEL_PRIMARY || 'llama-3.3-70b-versatile';
         const tier1 = await this.callModel(primaryModel, messages, options, timeout);
         if (this.isSuccess(tier1)) return tier1;
 
         console.warn(`Groq Primary (${primaryModel}) failed: ${tier1.error}. Trying fallback...`);
 
-        // Tier 2: Fallback (Reliable)
-        const fallbackModel = this.env.GROQ_MODEL_FALLBACK || 'llama-3.3-70b-versatile';
+        // Tier 2: Fallback (DeepSeek Reasoning)
+        const fallbackModel = this.env.GROQ_MODEL_FALLBACK || 'deepseek-r1-distill-llama-70b';
         const tier2 = await this.callModel(fallbackModel, messages, options, timeout);
         if (this.isSuccess(tier2)) return tier2;
 
@@ -133,7 +133,8 @@ export class GroqProvider {
             }
 
             const data: any = await response.json();
-            const content = data?.choices?.[0]?.message?.content || '';
+            const rawContent = data?.choices?.[0]?.message?.content || '';
+            const content = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
             const usage = data?.usage;
 
             return {

@@ -4,13 +4,13 @@ import { AgentBrain } from './agent_brain';
 import { SessionAuth } from './agent/sessionAuth';
 import { SessionExecutor } from './agent/sessionExecutor';
 import { parseTxIntent } from './agent/parser';
+import { CryptoUtils } from './utils/crypto';
 
 export class HawasFormatter {
     static formatWelcome() {
         return `
-👋 أهلاً بك يا ريس!
-أنا مساعدك الشخصي "حواس" 🇪🇬
-
+👋 أهلاً بك يا كبير!
+أنا حواس .. مساعدك الشخصي
 🔓 دلوقتي تقدر تنفذ معاملات على شبكة Base مباشرة من هنا!
 استخدم الأزرار تحت بدل الأوامر يا كبير.
 
@@ -91,9 +91,13 @@ export class HawasBrain {
                 const signer = SessionAuth.createSessionSigner();
                 const authMsg = SessionAuth.generateAuthMessage(signer.address, userId);
 
+                const secret = this.env.ENCRYPTION_SECRET;
+                if (!secret) return "⚠️ الميزة دي مقفولة حالياً لعدم وجود مفتاح تشفير ENCRYPTION_SECRET.";
+                const encryptedKey = await CryptoUtils.encrypt(signer.privateKey, secret);
+
                 await this.env.DB.prepare(
                     "INSERT INTO session_keys (user_id, wallet_address, session_public_key, session_private_key, permissions, expires_at, created_at) VALUES (?, 'WAITING', ?, ?, 'transfer', ?, ?)"
-                ).bind(userId, signer.address, signer.privateKey, Date.now() + 86400000, Date.now()).run();
+                ).bind(userId, signer.address, encryptedKey, Date.now() + 86400000, Date.now()).run();
 
                 return `🚀 **خطوة التفويض:**\n\nمن فضلك وقع الرسالة دي في محفظتك (Base):\n\n\`\`\`\n${authMsg}\n\`\`\`\n\nوبعدين ابعتلي النتيجة كدة:\n/authorize_signature <التوقيع>`;
 
@@ -122,6 +126,23 @@ export class HawasBrain {
             case '/resetcontext':
                 await this.agentBrain.resetContext();
                 return "✅ تمام، نسينا آخر كلام قولناه.";
+            case '/securitycheck':
+                if (!isOwner) return "🚫 الأوامر دي للمالك بس يا بطل.";
+                const hasSecret = !!this.env.ENCRYPTION_SECRET;
+
+                const sessions = await this.env.DB.prepare("SELECT * FROM session_keys").all<SessionKey>();
+                let encryptedCount = 0;
+                let rawCount = 0;
+
+                for (const s of sessions.results || []) {
+                    if (s.session_private_key && s.session_private_key.includes(':')) encryptedCount++;
+                    else rawCount++;
+                }
+
+                return `🛡️ **تقرير الأمان:**\n\n` +
+                    `- مفتاح التشفير (ENCRYPTION_SECRET): ${hasSecret ? '✅ مفعل' : '❌ غير موجود'}\n` +
+                    `- جلسات مشفرة: ${encryptedCount}\n` +
+                    `- جلسات غير مشفرة (خطر): ${rawCount}`;
             case '/status':
                 return "🤖 حواس جاهز ومنور.. كل أنظمة الذاكرة والمعاملات شغالة.";
             default:
@@ -175,9 +196,23 @@ export class HawasBrain {
 
         if (!session) return "⚠️ الجلسة منتهية أو مش موجودة. سجل دخول بـ /authorize الأول.";
 
+        let privateKey = session.session_private_key;
+        if (this.env.ENCRYPTION_SECRET) {
+            try {
+                const dec = await CryptoUtils.decrypt(privateKey, this.env.ENCRYPTION_SECRET);
+                privateKey = dec.plaintext;
+                if (dec.needsMigration) {
+                    const enc = await CryptoUtils.encrypt(privateKey, this.env.ENCRYPTION_SECRET);
+                    await this.env.DB.prepare("UPDATE session_keys SET session_private_key = ? WHERE id = ?").bind(enc, session.id).run();
+                }
+            } catch (e: any) {
+                return `❌ **فشلت عملية فك التشفير:** ${e.message}`;
+            }
+        }
+
         const executor = new SessionExecutor(this.env);
         const result = await executor.executeTransfer(
-            session.session_private_key as `0x${string}`,
+            privateKey as `0x${string}`,
             pending.recipient as `0x${string}`,
             pending.amount,
             (this.env.USDC_BASE_ADDRESS || '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913') as `0x${string}`,

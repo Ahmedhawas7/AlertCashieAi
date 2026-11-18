@@ -4,7 +4,8 @@ import { Env, TelegramUpdate, ScheduledEvent, ExecutionContext, HawasResponse } 
 import { generateAuthUrl, exchangeCodeForTokens, getUserInfo } from './carv/oauth';
 import { generateState } from './carv/crypto';
 import { savePendingSession, validateState, saveConnection, getConnection, cleanupExpiredSessions } from './carv/db';
-import { requireOwner, requireLinkedOwner } from './middleware/auth';
+import { BaseService } from './base/service';
+import { renderConnectPage } from './base/connectHtml';
 import { AgentMemorySystem } from './agent';
 import { BrainV2 } from './brain/brain';
 import { KnowledgeBase } from './brain/kb';
@@ -21,6 +22,9 @@ import { WhaleBalance } from './whale/balance';
 import { UserManager } from './agent/userManager';
 import { LiveNews } from './intel/liveNews';
 import { IntelFormatter } from './intel/formatter';
+import { AlertService } from './intel/alerts';
+import { ProactiveMonitor } from './intel/proactiveMonitor';
+import { GeminiProvider } from './ai/providers/gemini';
 
 // ✅ PolyAgent (MVP)
 import { getPolySettings, setPolySettings } from './polyAgent/state';
@@ -33,11 +37,11 @@ export default {
 
             // 1. Health check
             if (normalizedPath === '' || normalizedPath === '/health') {
-                return new Response('🤖 Hawas Worker Online (CARV ID Enabled)');
+                return new Response('🤖 Hawas Worker Online (Base Sovereign Link Enabled)');
             }
 
             // 2. FreeAI API Routes
-            if (normalizedPath.startsWith('/api/') && request.method === 'POST') {
+            if ((normalizedPath === '/api/ingest' || normalizedPath === '/api/ask' || normalizedPath === '/api/kb/search') && request.method === 'POST') {
                 const body: any = await request.json().catch(() => ({}));
                 if (normalizedPath === '/api/ingest') {
                     if (!body.url) return new Response('{"error":"Missing URL"}', { status: 400 });
@@ -65,33 +69,154 @@ export default {
                 return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
             }
 
-            // 3. OAuth Callback Handler
-            if (normalizedPath === '/auth/carv/callback' && request.method === 'GET') {
-                const code = url.searchParams.get('code');
-                const state = url.searchParams.get('state');
-                if (!code || !state) return new Response('Missing code/state', { status: 400 });
-                const telegramUserId = await validateState(env.DB, state);
-                if (!telegramUserId) return new Response('Invalid state', { status: 400 });
-                const tokens = await exchangeCodeForTokens(env, code);
-                const userInfo = await getUserInfo(env, tokens.access_token);
-                await saveConnection(
-                    env.DB,
-                    env,
-                    telegramUserId,
-                    userInfo.smart_wallet_address || null,
-                    userInfo.signer_wallet_address || null,
-                    userInfo.email || null,
-                    tokens.access_token,
-                    tokens.refresh_token || null,
-                    tokens.expires_in || null,
-                    'carv_id_basic_read email_basic_read evm_address_basic_read'
-                );
-                await sendTelegramMessage(
-                    env.BOT_TOKEN,
-                    parseInt(telegramUserId),
-                    `✅ <b>تم الربط بنجاح!</b>\n\n🆔 Wallet: <code>${userInfo.smart_wallet_address}</code>`
-                );
-                return new Response('Success! Return to Telegram.');
+            // Hawas AI Direct Chat Endpoint (For WhatsApp Bridge / Web / App)
+            if (normalizedPath === '/api/chat' && request.method === 'POST') {
+                const body: any = await request.json().catch(() => ({}));
+                const userId = String(body.userId || body.phone || 'User');
+                const name = String(body.name || 'User');
+                const text = String(body.text || '');
+                if (!text) {
+                    return new Response(JSON.stringify({ error: "Missing text" }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+                }
+
+                const brain = new BrainV2(env.DB, env);
+                const result = await brain.handleMessage(userId, name, text, userId, 'web');
+                const replyText = typeof result === 'string' ? result : result.text;
+                const cleanReply = replyText.replace(/<[^>]+>/g, '');
+                return new Response(JSON.stringify({ reply: cleanReply }), {
+                    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }
+                });
+            }
+
+            // Hawas Daily Diary Endpoint (Read or Trigger Self-Reflection)
+            if (normalizedPath === '/api/diary') {
+                const userId = url.searchParams.get('userId') || 'User';
+                const brain = new BrainV2(env.DB, env);
+                const diaryText = await brain.generateDailyDiary(userId);
+                return new Response(JSON.stringify({ diary: diaryText }), {
+                    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }
+                });
+            }
+
+            const corsHeaders = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            };
+
+            if (request.method === 'OPTIONS') {
+                return new Response(null, { headers: corsHeaders });
+            }
+
+            // 3. Base Sovereign Web3 Connect & Verification Routes
+            if (normalizedPath === '/connect' && (request.method === 'GET' || request.method === 'HEAD')) {
+                const uid = url.searchParams.get('uid') || env.OWNER_TELEGRAM_ID || '';
+                const html = renderConnectPage(uid, 'HawasAgentBot');
+                return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+            }
+
+            if (normalizedPath === '/api/base/session' && request.method === 'GET') {
+                const uid = url.searchParams.get('uid') || env.OWNER_TELEGRAM_ID || '';
+                const baseService = new BaseService(env.DB, env);
+                const sessionData = await baseService.generateNonce(uid);
+                return new Response(JSON.stringify(sessionData), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            }
+
+            if (normalizedPath === '/api/base/verify' && request.method === 'POST') {
+                try {
+                    const body: any = await request.json().catch(() => ({}));
+                    const telegramUserId = String(body.telegramUserId || body.telegram_user_id || body.uid || '').trim();
+                    const walletAddress = String(body.walletAddress || body.wallet_address || body.address || '').trim();
+                    const signature = String(body.signature || body.sig || '').trim();
+                    const nonce = String(body.nonce || '').trim();
+
+                    if (!telegramUserId || !walletAddress || !signature || !nonce) {
+                        const missing = [];
+                        if (!telegramUserId) missing.push('معرف تيليجرام');
+                        if (!walletAddress) missing.push('عنوان المحفظة');
+                        if (!signature) missing.push('التوقيع');
+                        if (!nonce) missing.push('رمز الجلسة');
+                        return new Response(JSON.stringify({ 
+                            success: false, 
+                            error: `بيانات التوقيع غير مكتملة (${missing.join('، ')})` 
+                        }), { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+                    }
+
+                    const baseService = new BaseService(env.DB, env);
+                    const res = await baseService.verifyAndLink(telegramUserId, walletAddress, signature, nonce);
+                    if (res.success) {
+                        try {
+                            const balances = await baseService.getBalances(walletAddress);
+                            const shortAddr = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
+                            await sendTelegramMessage(
+                                env.BOT_TOKEN,
+                                parseInt(telegramUserId),
+                                `🎉 <b>تم ربط محفظتك السيادية على شبكة Base بنجاح!</b>\n\n` +
+                                `📍 <b>المحفظة:</b> <code>${shortAddr}</code>\n` +
+                                `🪙 <b>الرصيد:</b> <code>${balances.eth} ETH</code> | <code>$${balances.usdc} USDC</code>\n` +
+                                `⚡ <b>الشبكة:</b> Base Mainnet (رسوم &lt; $0.005)\n\n` +
+                                `يمكنك الآن أن تسألني: <i>"رصيدي على Base كام؟"</i> أو تطلب اقتراح خطط تداول وتحويل بحماية كاملة!`
+                            );
+                        } catch (notifyErr) {
+                            console.error('Failed to send telegram notification:', notifyErr);
+                        }
+                    }
+                    return new Response(JSON.stringify(res), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+                } catch (err: any) {
+                    console.error('Error in /api/base/verify:', err);
+                    return new Response(JSON.stringify({ success: false, error: err.message || 'خطأ غير متوقع أثناء معالجة التوقيع' }), { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+                }
+            }
+
+            if (normalizedPath === '/api/base/wallet' && request.method === 'GET') {
+                const uid = url.searchParams.get('uid') || env.OWNER_TELEGRAM_ID || '';
+                const baseService = new BaseService(env.DB, env);
+                const conn = await baseService.getConnection(uid);
+                if (!conn) {
+                    return new Response(JSON.stringify({ linked: false, error: 'Not linked' }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+                }
+                const balances = await baseService.getBalances(conn.wallet_address);
+                return new Response(JSON.stringify({ linked: true, ...balances }), { headers: { 'Content-Type': 'application/json', ...corsHeaders } });
+            }
+
+            // 3.5. WhatsApp Cloud API Webhook
+            if (url.pathname === '/whatsapp' && request.method === 'GET') {
+                const mode = url.searchParams.get('hub.mode');
+                const token = url.searchParams.get('hub.verify_token');
+                const challenge = url.searchParams.get('hub.challenge');
+                const expectedToken = env.WHATSAPP_VERIFY_TOKEN || 'hawas_wa_secret';
+                if (mode === 'subscribe' && token === expectedToken) {
+                    return new Response(challenge || '', { status: 200 });
+                }
+                return new Response('Forbidden', { status: 403 });
+            }
+
+            if (url.pathname === '/whatsapp' && request.method === 'POST') {
+                try {
+                    const body: any = await request.json();
+                    const entry = body?.entry?.[0];
+                    const change = entry?.changes?.[0]?.value;
+                    const message = change?.messages?.[0];
+
+                    if (message && message.type === 'text') {
+                        const fromPhone = message.from; // e.g. "201012345678"
+                        const incomingText = message.text?.body || '';
+                        const contactName = change?.contacts?.[0]?.profile?.name || 'User';
+
+                        const brain = new BrainV2(env.DB, env);
+                        const result = await brain.handleMessage(fromPhone, contactName, incomingText, fromPhone, 'web');
+                        const replyText = typeof result === 'string' ? result : result.text;
+                        const cleanReply = replyText.replace(/<[^>]+>/g, '');
+
+                        if (env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID) {
+                            await sendWhatsAppMessage(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_PHONE_NUMBER_ID, fromPhone, cleanReply);
+                        }
+                    }
+                    return new Response('EVENT_RECEIVED', { status: 200 });
+                } catch (waErr) {
+                    console.error('WhatsApp Webhook Error:', waErr);
+                    return new Response('OK', { status: 200 });
+                }
             }
 
             // 4. Telegram Webhook (RESTORED)
@@ -111,6 +236,57 @@ export default {
                         senderName = update.message.from?.first_name || 'Hustler';
                         text = update.message.text || update.message.caption || '';
                         messageThreadId = update.message.message_thread_id;
+
+                        // 🎤 Voice Note Transcription
+                        if (update.message.voice && env.GEMINI_API_KEY) {
+                            try {
+                                const voiceFileRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${update.message.voice.file_id}`);
+                                if (voiceFileRes.ok) {
+                                    const voiceFileInfo: any = await voiceFileRes.json();
+                                    const voicePath = voiceFileInfo.result?.file_path;
+                                    if (voicePath) {
+                                        const audioRes = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${voicePath}`);
+                                        if (audioRes.ok) {
+                                            const audioBuf = await audioRes.arrayBuffer();
+                                            const gemini = new GeminiProvider(env);
+                                            const transcribed = await gemini.transcribe(audioBuf, update.message.voice.mime_type || 'audio/ogg');
+                                            if (transcribed) text = transcribed;
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn('Voice transcription failed:', e);
+                            }
+                        }
+
+                        // 📸 Chart & Photo Analysis
+                        if (update.message.photo && Array.isArray(update.message.photo) && update.message.photo.length > 0 && env.GEMINI_API_KEY) {
+                            try {
+                                const largestPhoto = update.message.photo[update.message.photo.length - 1];
+                                const photoFileRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${largestPhoto.file_id}`);
+                                if (photoFileRes.ok) {
+                                    const photoFileInfo: any = await photoFileRes.json();
+                                    const photoPath = photoFileInfo.result?.file_path;
+                                    if (photoPath) {
+                                        const photoRes = await fetch(`https://api.telegram.org/file/bot${env.BOT_TOKEN}/${photoPath}`);
+                                        if (photoRes.ok) {
+                                            const photoBuf = await photoRes.arrayBuffer();
+                                            const gemini = new GeminiProvider(env);
+                                            const analysis = await gemini.analyzeImage(photoBuf, 'image/jpeg', update.message.caption);
+                                            if (analysis && chatId) {
+                                                await sendTelegramMessage(env.BOT_TOKEN, chatId, analysis, {
+                                                    reply_markup: { remove_keyboard: true },
+                                                    message_thread_id: messageThreadId
+                                                });
+                                                return new Response('OK');
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn('Photo chart analysis failed:', e);
+                            }
+                        }
                     } else if (update.callback_query) {
                         chatId = update.callback_query.message?.chat.id;
                         userId = update.callback_query.from?.id;
@@ -205,8 +381,8 @@ export default {
 
                             if (command === '/start') {
                                 const manifesto = new AgentManifesto(env);
-                                const caps = manifesto.getCapabilities().filter(c => c.enabled).map(c => `✅ ${c.name}`).join('\n');
-                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `يا هلا بيك يا ${senderName}! أنا حواس (HX7 Agent).\n\n📃 **My Active Capabilities:**\n${caps}`, { reply_markup: getMainMenu() });
+                                const caps = manifesto.getCapabilities().filter(c => c.enabled).map(c => `✨ ${c.name}`).join('\n');
+                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `يا هلا بيك يا ${senderName}! أنا حواس.\n\nرفيقك الذكي وعقلك الحاضر؛ جاهز لحل أصعب الواجبات ومسائل الثانوية العامة، تنظيم مواعيدك وتذكيرك، وفهم مشاعرك وأبراجك، والدردشة في أي موضوع تحبه.\n\n🌟 **أبرز القدرات النشطة:**\n${caps}`, { reply_markup: { remove_keyboard: true } });
                             } else if (command === '/agent_status') {
                                 const manifesto = new AgentManifesto(env);
                                 const caps = manifesto.getCapabilities();
@@ -229,15 +405,23 @@ export default {
                                         await sendTelegramMessage(env.BOT_TOKEN, chatId, "❌ Invalid mode. Use: SILENT, CHATTY, or NEWS_ONLY.");
                                     }
                                 }
-                            } else if (command === '/connect') {
+                            } else if (command === '/connect' || command === '/base_connect') {
                                 const uid = Number(userId);
                                 if (!uid) return new Response('Invalid User ID', { status: 400 });
 
-                                const state = generateState();
-                                const expiresAt = Date.now() + (10 * 60 * 1000); // 10 minutes
-                                await savePendingSession(env.DB, uid.toString(), state, expiresAt);
-                                const authUrl = generateAuthUrl(env, state);
-                                await sendTelegramMessage(env.BOT_TOKEN, chatId, `اضغط هنا للربط: [Connect CARV ID](${authUrl})`, { parse_mode: 'Markdown' });
+                                const connectUrl = `https://hawas-worker.hawas-alertai.workers.dev/connect?uid=${uid}`;
+                                await sendTelegramMessage(
+                                    env.BOT_TOKEN,
+                                    chatId,
+                                    `🔵 <b>ربط محفظة Base السيادية</b>\n\n` +
+                                    `لربط محفظتك والتوقيع بدون أي رسوم غاز، اضغط على الرابط التالي:\n` +
+                                    `<a href="${connectUrl}">👉 فتح صفحة التوقيع والربط مع Base</a>\n\n` +
+                                    `🛡️ <b>حماية كاملة:</b>\n` +
+                                    `• التوقيع تشفيري مجاني (EIP-191 Personal Sign)\n` +
+                                    `• يدعم Coinbase Smart Wallet (FaceID) و MetaMask و Rabby\n` +
+                                    `• يتيح للبوت قراءة أصولك واقتراح خطط التداول التي تتطلب موافقتك دائماً قبل التنفيذ.`,
+                                    { parse_mode: 'HTML' }
+                                );
                             } else if (command === '/news') {
                                 await sendTelegramMessage(env.BOT_TOKEN, chatId, "⏳ جاري جلب آخر الأخبار الموثقة...");
                                 const intel = await LiveNews.fetchLatest(true);
@@ -437,13 +621,14 @@ export default {
                             }
 
                             if (result) {
+                                const removeKb = { remove_keyboard: true };
                                 if (typeof result === 'string') {
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, result, {
-                                        reply_markup: isOwner ? getMainMenu() : undefined,
+                                        reply_markup: removeKb,
                                         message_thread_id: messageThreadId
                                     });
                                 } else {
-                                    const replyMarkup = result.reply_markup || (isOwner ? getMainMenu() : undefined);
+                                    const replyMarkup = result.reply_markup || removeKb;
                                     await sendTelegramMessage(env.BOT_TOKEN, chatId, result.text, {
                                         reply_markup: replyMarkup,
                                         message_thread_id: messageThreadId
@@ -479,22 +664,53 @@ export default {
         try {
             const ownerId = parseInt(env.OWNER_TELEGRAM_ID || '0');
 
-            // 1. Daily Digest
-            if (event.cron === "0 9 * * *") {
-                const agentMemory = new AgentMemorySystem(env.DB, env);
-                const digest = await agentMemory.generateDailyDigest();
-                if (ownerId) {
-                    await sendTelegramMessage(env.BOT_TOKEN, ownerId, `🌅 **ملخص يومي تلقائي**\n\n${digest}`);
-                }
+            // 1. Check Autonomous User Price Alerts & Reminders
+            try {
+                const alertService = new AlertService(env.DB);
+                await alertService.checkAndTriggerAlerts(async (cid, txt) => {
+                    await sendTelegramMessage(env.BOT_TOKEN, cid, txt, { parse_mode: 'HTML' });
+                });
+            } catch (alertErr) {
+                console.error('Alerts Trigger Error:', alertErr);
             }
 
-            // 2. 12h Intelligence Report
+            // 2. Proactive Market Volatility Monitoring
+            try {
+                const proactive = new ProactiveMonitor(env.DB);
+                await proactive.checkVolatilityAndAlert(env.OWNER_TELEGRAM_ID, async (cid, txt) => {
+                    await sendTelegramMessage(env.BOT_TOKEN, cid, txt, { parse_mode: 'HTML' });
+                });
+
+                // 3. Daily Morning Briefing (09:00 UTC)
+                if (event.cron === "0 9 * * *") {
+                    await proactive.sendMorningBrief(env.OWNER_TELEGRAM_ID, async (cid, txt) => {
+                        await sendTelegramMessage(env.BOT_TOKEN, cid, txt, { parse_mode: 'HTML' });
+                    });
+                }
+            } catch (proactiveErr) {
+                console.error('Proactive Monitor Error:', proactiveErr);
+            }
+
+            // 4. 12h Intelligence Report
             if (event.cron === "0 */12 * * *") {
                 const intel = await LiveNews.fetchLatest(true);
                 if (intel && ownerId) {
                     const report = IntelFormatter.formatNewsReport(intel);
                     await sendTelegramMessage(env.BOT_TOKEN, ownerId, `📊 **تحديث استخباراتي (12h)**\n\n${report}`, { parse_mode: 'Markdown' });
                 }
+            }
+
+            // 5. Hawas Daily Self-Reflection & Diary Synthesis (End of day / 12h cycle)
+            try {
+                const diaryBrain = new BrainV2(env.DB, env);
+                const activeUsers = await env.DB.prepare(
+                    "SELECT DISTINCT user_id FROM episodic_logs WHERE ts > ? LIMIT 20"
+                ).bind(Date.now() - 24 * 60 * 60 * 1000).all<{ user_id: string }>();
+                for (const u of activeUsers.results || []) {
+                    await diaryBrain.generateDailyDiary(u.user_id).catch(() => {});
+                }
+            } catch (diaryErr) {
+                console.error('Scheduled Diary Error:', diaryErr);
             }
 
             // 3. PolyAgent Scan (Every 5 mins)
@@ -529,23 +745,72 @@ export default {
 
 function getMainMenu() {
     return {
-        keyboard: [[{ text: "📊 Status" }, { text: "❓ Help" }]],
-        resize_keyboard: true
+        remove_keyboard: true
     };
 }
 
 async function sendTelegramMessage(token: string, chatId: number, text: string, opts?: any) {
     if (!token) return;
     const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            chat_id: chatId,
-            message_thread_id: opts?.message_thread_id,
-            text: text,
-            parse_mode: opts?.parse_mode || 'HTML',
-            reply_markup: opts?.reply_markup
-        })
-    });
+    const parseMode = opts?.parse_mode || 'HTML';
+
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                message_thread_id: opts?.message_thread_id,
+                text: text,
+                parse_mode: parseMode,
+                reply_markup: opts?.reply_markup
+            })
+        });
+
+        if (!res.ok) {
+            const errBody = await res.text();
+            console.error('sendTelegramMessage failed:', res.status, errBody);
+            // Fallback: If Telegram rejected due to HTML/Markdown entities, resend as clean plain text
+            if (errBody.includes("can't parse entities") || res.status === 400) {
+                const plainText = text.replace(/<[^>]+>/g, '');
+                await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        message_thread_id: opts?.message_thread_id,
+                        text: plainText,
+                        reply_markup: opts?.reply_markup
+                    })
+                });
+            }
+        }
+    } catch (netErr) {
+        console.error('sendTelegramMessage network error:', netErr);
+    }
+}
+
+async function sendWhatsAppMessage(token: string, phoneId: string, to: string, text: string) {
+    if (!token || !phoneId || !to) return;
+    try {
+        const res = await fetch(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                to: to,
+                type: 'text',
+                text: { body: text }
+            })
+        });
+        if (!res.ok) {
+            const err = await res.text();
+            console.error('sendWhatsAppMessage Meta API error:', res.status, err);
+        }
+    } catch (err) {
+        console.error('sendWhatsAppMessage error:', err);
+    }
 }

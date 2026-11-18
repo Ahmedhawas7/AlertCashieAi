@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: hawas-whatsapp-bridge
+    env: node
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: node scripts/whatsapp-bridge.js
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: HAWAS_API_URL
+        value: https://hawas-worker.hawas-alertai.workers.dev/api/chat

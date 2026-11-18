@@ -6,7 +6,7 @@ export type Intent =
     | 'KB_SEARCH' | 'KB_ADD' | 'KB_LIST'
     | 'DEEP_RESEARCH' | 'DISTRIBUTE'
     | 'TROUBLESHOOT' | 'EXPLAIN' | 'SUMMARIZE'
-    | 'GENERAL'  // Added for conversational filler
+    | 'CAPABILITIES' | 'GENERAL'
     | 'UNKNOWN';
 
 export interface Entities {
@@ -48,6 +48,8 @@ export class NLUParser {
             intent = 'CONNECT';
         } else if (this.matchGroup(normalized, ['الحالة', 'جاهز', 'status'])) {
             intent = 'STATUS';
+        } else if (this.matchGroup(normalized, ['تقدر تعمل ايه', 'بتعمل ايه', 'مميزاتك', 'قدراتك', 'capabilities'])) {
+            intent = 'CAPABILITIES';
         } else if (this.matchGroup(normalized, ['ابعت', 'حول', 'ارسل', 'هات', 'send', 'transfer', 'pay'])) {
             intent = 'TRANSFER_INTENT';
         } else if (this.matchGroup(normalized, ['اكد', 'نفذ', 'تمام', 'ماشي', 'confirm', 'execute'])) {

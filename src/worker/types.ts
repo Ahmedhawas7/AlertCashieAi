@@ -16,9 +16,18 @@ export interface Env {
     AI_DAILY_LIMIT?: string;
     AI_MAX_TOKENS?: string;
     AI_TIMEOUT_MS?: string;
+    OPENROUTER_API_KEY?: string;
     OPENROUTER_MODEL?: string;
 
+    // FreeAI — free-claude-code proxy (61+ providers, 1.3B+ free tokens/month)
+    // https://github.com/Alishahryar1/free-claude-code
+    FREEAI_BASE_URL?: string;       // e.g. http://localhost:3000/v1 or your tunnel URL
+    FREEAI_API_KEY?: string;        // default: 'fcc' (when proxy auth is disabled)
+    FREEAI_MODEL?: string;          // e.g. nvidia_nim/nvidia/nemotron-3-super-120b-a12b
+
     // Groq Multi-Model Configuration
+    GROQ_API_KEY?: string;
+    GROQ_BASE_URL?: string;
     GROQ_MODEL_PRIMARY?: string;
     GROQ_MODEL_FALLBACK?: string;
     GROQ_MODEL_FAST?: string;
@@ -38,9 +47,16 @@ export interface Env {
     BASE_RPC_URL?: string;
     BASE_PRIVATE_KEY?: string; // Secret
     USDC_BASE_ADDRESS?: string;
+    BASE_BUILDER_CODE?: string;
+    BASE_BUILDER_ENCODED?: string;
 
     // Agent Personality
     DEFAULT_PERSONA?: 'calm' | 'hype' | 'strict';
+
+    // WhatsApp Cloud API Integration
+    WHATSAPP_ACCESS_TOKEN?: string;
+    WHATSAPP_PHONE_NUMBER_ID?: string;
+    WHATSAPP_VERIFY_TOKEN?: string;
 }
 
 export interface SessionKey {
@@ -168,4 +184,21 @@ export interface ScheduledEvent {
 export interface ExecutionContext {
     waitUntil(promise: Promise<any>): void;
     passThroughOnException(): void;
+}
+
+export interface BrainReasoningLog {
+    user_id: string;
+    intent: string;
+    entities: string;
+    memory_used_keys: string[];
+    context_count: number;
+    tools_used: string[];
+    planner_ran: boolean;
+    timestamp: number;
+}
+export interface ToolResult {
+    tool: string;
+    success: boolean;
+    result?: any;
+    error?: string;
 }

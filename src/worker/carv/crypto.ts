@@ -17,7 +17,7 @@ export async function encrypt(text: string, secret: string): Promise<string> {
 
     const key = await crypto.subtle.importKey(
         'raw',
-        keyData,
+        keyData.buffer as ArrayBuffer,
         { name: 'AES-GCM' },
         false,
         ['encrypt']
@@ -54,8 +54,8 @@ export async function decrypt(encryptedText: string, secret: string): Promise<st
 
     const key = await crypto.subtle.importKey(
         'raw',
-        keyData,
-        'AES-GCM',
+        keyData.buffer as ArrayBuffer,
+        { name: 'AES-GCM' },
         false,
         ['decrypt']
     );

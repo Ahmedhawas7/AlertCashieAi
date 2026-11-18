@@ -10,7 +10,7 @@ database_id = "99fe7a34-6c23-4757-b307-76abc65e5310"
 
 # Cron Trigger for Daily Digest and 12h Reports
 [triggers]
-crons = ["0 9 * * *", "0 */12 * * *"]
+crons = ["*/5 * * * *", "0 9 * * *", "0 */12 * * *"]
 
 [vars]
 # Default variables
@@ -19,12 +19,23 @@ DEFAULT_GROUP_LANG = "ar"
 AI_ENABLED_DEFAULT = "true"
 TELEGRAM_ADMIN_IDS = "6856984764"
 AI_DAILY_LIMIT = "99999"
+SUPABASE_URL = "https://pcvigzpcpoqtipgzzknv.supabase.co"
+WHATSAPP_PHONE_NUMBER_ID = "1498079933379629"
+WHATSAPP_VERIFY_TOKEN = "hawas_wa_secret"
+WHATSAPP_ACCESS_TOKEN = "EAAWc7rUZB0vMBTDNNhLg4Erf4Xagh614iZA7yjvIK7ZAKF5nrmgLP2zoOa6sT4vaTazmZAZCPThihvZBK13SBRn13YgZAA72s0oZBk3ZBh8ZBi6sLubDh9ZARSZBZB7N1epEgqZC8Lr9hXJOIt3dJ5tfrnhierz5aZAVdtZAZAaeCVrDw8IhEWhtp6ZB1UKN67NFs8PBxGnEwyZCzDL91ZBY9qR99RFWTpavuZAIugmReKJ0rgZCPdt0aiVsTvoPSH3gnqkav5abStpsRUvIvEy2l34d5hh1GUUS0UE0uXhUqonZCr2v2GOdi9m"
+
+# FreeAI — free-claude-code proxy (https://github.com/Alishahryar1/free-claude-code)
+# Set FREEAI_BASE_URL to your FCC server (local tunnel or remote URL)
+# FREEAI_BASE_URL = "http://localhost:3000/v1"  # local FCC server
+# FREEAI_MODEL = "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"  # or any FCC model
 
 # CARV OAuth Configuration
 OWNER_TELEGRAM_ID = "6856984764"  # Your Telegram user ID
 CARV_REDIRECT_URL = "https://hawas-worker.hawas-alertai.workers.dev/auth/carv/callback"
 BASE_RPC_URL = "https://mainnet.base.org"
 USDC_BASE_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+BASE_BUILDER_CODE = "bc_s4ho9ei8"
+BASE_BUILDER_ENCODED = "0x62635f7334686f396569380b0080218021802180218021802180218021"
 
 # Secrets (add via `wrangler secret put <NAME>`)
 # BOT_TOKEN
@@ -37,3 +48,5 @@ USDC_BASE_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 # POLY_API_KEY (Polymarket/CLOB API Key)
 # POLY_API_SECRET (Polymarket/CLOB API Secret)
 # POLY_API_PASSPHRASE (Polymarket/CLOB API Passphrase)
+# FREEAI_BASE_URL (your FCC proxy URL — use `wrangler secret put FREEAI_BASE_URL`)
+# FREEAI_API_KEY  (FCC proxy auth token, if enabled)
