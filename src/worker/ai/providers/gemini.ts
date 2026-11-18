@@ -37,11 +37,10 @@ export class GeminiProvider {
         }
 
         const candidates = [
-            'gemini-3-flash-preview',
-            'gemini-flash-latest',
             'gemini-flash-lite-latest',
-            'gemini-2.5-flash',
-            'gemini-2.5-flash-lite'
+            'gemini-3.5-flash-lite',
+            'gemini-3-flash-preview',
+            'gemini-flash-latest'
         ];
 
         let lastError = '';
@@ -174,11 +173,10 @@ export class GeminiProvider {
         if (!this.apiKey) throw new Error('GEMINI_API_KEY missing');
 
         const candidates = [
-            'gemini-3-flash-preview',
-            'gemini-flash-latest',
             'gemini-flash-lite-latest',
-            'gemini-2.5-flash',
-            'gemini-2.5-flash-lite'
+            'gemini-3.5-flash-lite',
+            'gemini-3-flash-preview',
+            'gemini-flash-latest'
         ];
 
         const uint8 = new Uint8Array(imageData);
