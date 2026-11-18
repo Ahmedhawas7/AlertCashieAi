@@ -93,18 +93,41 @@ export class BrainV2 {
                     return `⚠️ (AI Error: ${err.message})`;
                 }
 
-                // Gender-aware graceful fallback
+                // Contextual & varied graceful fallback
                 let uGender = await this.memory.getFact(userId, 'gender');
                 let uName = await this.memory.getFact(userId, 'name');
                 const isFemale = uGender?.value === 'female';
                 const name = uName?.value;
-                if (isFemale) {
-                    const voc = name ? `يا ${name}` : 'يا ستي';
-                    return `معلش ${voc}، السيرفر سرح مني في فنجان قهوة لثواني! 😂 بس أنا معاكِ وسامعك أهو، قولي لي كنتِ بتقولي إيه؟`;
-                } else {
-                    const voc = name ? `يا ${name}` : 'يا غالي';
-                    return `معلش ${voc}، السيرفر سرح مني في فنجان قهوة لثواني! 😂 بس أنا معاك وسامعك أهو، قولي كنت بتقول إيه؟`;
+                const voc = name ? `يا ${name}` : (isFemale ? 'يا ستي' : 'يا غالي');
+
+                if (/(ابراج|أبراج|برجك|برجي)/i.test(text)) {
+                    return isFemale
+                        ? `أنا في الأبراج حكايتي حكاية ${voc}! 😂 قولي لي إنتِ برج إيه بس وأنا أرصلك تفاصيلك كلها!`
+                        : `أنا في الأبراج معلم كبير ${voc}! 😂 قولي بس إنت برج إيه وأنا أقولك صفاتك بالمللي!`;
                 }
+                if (/^(؟+|\?+|ايه|إيه)$/i.test(text.trim())) {
+                    return isFemale
+                        ? `معاكِ وسامعك أهو بكل تركيز يا طيبة! كملي كلامك، النت بس كان بيتدلع لثانية.`
+                        : `معاك وسامعك أهو يا بطل! كمل، النت بس كان بيهنج لثانية.`;
+                }
+                if (/(بتعمل ايه|بتسوي ايه|فينك)/i.test(text)) {
+                    return isFemale
+                        ? `قاعد ومربع وبسمعك بقلبي ${voc}.. قولي لي كنتِ بتقولي إيه؟`
+                        : `قاعد ومروق ومتابع معاك يا بطل.. خير كنت بتقول إيه؟`;
+                }
+
+                const fallbacksFemale = [
+                    `سامعك ومركز معاكِ ${voc}.. قولي لي كنتِ بتقولي إيه؟`,
+                    `معاكِ أهو ${voc} بكل اهتمام! كملي فكرتك وماتشيليش هم.`,
+                    `حاضر من عيوني ${voc}، كملي كلامك وسامعك خطوة بخطوة.`
+                ];
+                const fallbacksMale = [
+                    `سامعك ومركز معاك ${voc}.. قولي كنت بتقول إيه؟`,
+                    `معاك أهو ${voc} يا بطل! كمل وسامعك بكل اهتمام.`,
+                    `حاضر من عيوني ${voc}، كمل كلامك وأنا معاك.`
+                ];
+                const pool = isFemale ? fallbacksFemale : fallbacksMale;
+                return pool[Math.floor(Math.random() * pool.length)];
             }
         }
 
