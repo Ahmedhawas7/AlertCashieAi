@@ -3,7 +3,7 @@
  * Provides both terminal QR, Web-based visual QR, and keep-alive server for 24/7 hosting!
  */
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } = require('@whiskeysockets/baileys');
 const qrcodeTerminal = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const express = require('express');
@@ -192,20 +192,57 @@ async function startHawasWhatsApp() {
             const remoteJid = m.key.remoteJid;
             if (!remoteJid || remoteJid.includes('@broadcast') || remoteJid.includes('status@broadcast')) continue;
 
-            const incomingText =
-                m.message?.conversation ||
-                m.message?.extendedTextMessage?.text ||
-                m.message?.imageMessage?.caption ||
-                m.message?.videoMessage?.caption ||
-                '';
+            const isImage = !!m.message?.imageMessage;
+            const isAudio = !!(m.message?.audioMessage || m.message?.voiceMessage);
+            const isVideo = !!m.message?.videoMessage;
 
-            if (!incomingText.trim()) continue;
+            const caption = (m.message?.imageMessage?.caption || m.message?.videoMessage?.caption || '').trim();
+            const textContent = (m.message?.conversation || m.message?.extendedTextMessage?.text || caption || '').trim();
+
+            // Skip if not text, image, or audio
+            if (!textContent && !isImage && !isAudio) continue;
 
             const senderName = m.pushName || 'صديق';
             const cleanPhone = remoteJid.split('@')[0];
 
-            console.log(`\n📩 رسالة جديدة من: ${senderName} (${cleanPhone})`);
-            console.log(`💬 المحتوى: "${incomingText}"`);
+            let payload = {
+                userId: cleanPhone,
+                name: senderName,
+                text: textContent
+            };
+
+            // 📸 Handle Incoming Images (Convert to Base64 for Gemini Vision)
+            if (isImage) {
+                try {
+                    console.log(`\n📸 جاري تنزيل الصورة من: ${senderName} (${cleanPhone})...`);
+                    const imgBuffer = await downloadMediaMessage(m, 'buffer', {});
+                    if (imgBuffer && imgBuffer.length > 0) {
+                        payload.imageBase64 = imgBuffer.toString('base64');
+                        payload.mimeType = m.message.imageMessage.mimetype || 'image/jpeg';
+                        console.log(`✅ تم استلام الصورة بنجاح (${(imgBuffer.length / 1024).toFixed(1)} KB)`);
+                    }
+                } catch (mediaErr) {
+                    console.error('❌ تعذر تحميل بيانات الصورة:', mediaErr.message);
+                }
+            }
+
+            // 🎙️ Handle Incoming Audio / Voice Notes (Convert to Base64 for Gemini Transcription)
+            if (isAudio) {
+                try {
+                    console.log(`\n🎙️ جاري تنزيل الرسالة الصوتية من: ${senderName} (${cleanPhone})...`);
+                    const audioBuffer = await downloadMediaMessage(m, 'buffer', {});
+                    if (audioBuffer && audioBuffer.length > 0) {
+                        payload.audioBase64 = audioBuffer.toString('base64');
+                        payload.mimeType = m.message.audioMessage?.mimetype || 'audio/ogg';
+                        console.log(`✅ تم استلام الصوت بنجاح (${(audioBuffer.length / 1024).toFixed(1)} KB)`);
+                    }
+                } catch (audioErr) {
+                    console.error('❌ تعذر تحميل الصوت:', audioErr.message);
+                }
+            }
+
+            console.log(`\n📩 رسالة جديدة من: ${senderName} (${cleanPhone}) | النوع: ${isImage ? 'صورة 📸' : (isAudio ? 'صوت 🎙️' : 'نص 💬')}`);
+            if (textContent) console.log(`💬 المحتوى: "${textContent}"`);
 
             try {
                 await sock.sendPresenceUpdate('composing', remoteJid);
@@ -213,11 +250,7 @@ async function startHawasWhatsApp() {
                 const response = await fetch(HAWAS_API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        userId: cleanPhone,
-                        name: senderName,
-                        text: incomingText
-                    })
+                    body: JSON.stringify(payload)
                 });
 
                 if (!response.ok) {

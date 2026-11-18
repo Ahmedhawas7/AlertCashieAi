@@ -76,11 +76,66 @@ export default {
                 const userId = String(body.userId || body.phone || 'User');
                 const name = String(body.name || 'User');
                 const text = String(body.text || '');
-                if (!text) {
-                    return new Response(JSON.stringify({ error: "Missing text" }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-                }
+                const imageBase64 = body.imageBase64;
+                const audioBase64 = body.audioBase64;
 
                 const brain = new BrainV2(env.DB, env);
+
+                // 1. Audio / Voice Note Message
+                if (audioBase64 && env.GEMINI_API_KEY) {
+                    try {
+                        const binaryStr = atob(audioBase64);
+                        const bytes = new Uint8Array(binaryStr.length);
+                        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+                        const gemini = new GeminiProvider(env);
+                        const transcribed = await gemini.transcribe(bytes.buffer, body.mimeType || 'audio/ogg');
+                        if (transcribed) {
+                            const result = await brain.handleMessage(userId, name, transcribed, userId, 'web');
+                            const replyText = typeof result === 'string' ? result : result.text;
+                            return new Response(JSON.stringify({ reply: replyText.replace(/<[^>]+>/g, '') }), {
+                                headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Audio transcription error:', e);
+                    }
+                }
+
+                // 2. Image Message (Multimodal Vision Analysis)
+                if (imageBase64 && env.GEMINI_API_KEY) {
+                    try {
+                        const binaryStr = atob(imageBase64);
+                        const bytes = new Uint8Array(binaryStr.length);
+                        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+                        const gemini = new GeminiProvider(env);
+
+                        const uName = await brain.memory.getFact(userId, 'name');
+                        const uGender = await brain.memory.getFact(userId, 'gender');
+                        const isFemale = uGender?.value === 'female';
+                        const registeredName = uName?.value || name || '';
+
+                        const prompt = text && text.trim() && text !== 'صورة' && text !== 'علق على الصورة'
+                            ? `أنت "حواس" الصديق المصري الذكي ابن البلد، خفيف الدم والأصيل. صاحبك ${registeredName ? `(${registeredName})` : (isFemale ? '(صديقة طيبة)' : '(صاحب وجدع)')} باعتلك الصورة دي في الشات وبيقولك: "${text}".
+علق على الصورة بأسلوبك المصري العفوي، الذكي وخفيف الظل في سطرين أو ثلاثة؛ شوف إيه اللي في الصورة وعلق عليه مباشرة (لو شارت أو كتاب أو قهوة أو صورة شخصية له أو تصميم إلخ):`
+                            : `أنت "حواس" الصديق المصري الذكي ابن البلد، خفيف الدم والأصيل. صاحبك ${registeredName ? `(${registeredName})` : (isFemale ? '(صديقة طيبة)' : '(صاحب وجدع)')} باعتلك الصورة دي في الشات.
+علق على الصورة بأسلوبك المصري العفوي، الذكي وخفيف الظل في سطرين أو ثلاثة: ركز في تفاصيل الصورة (لو صورة شخصية له امدحه واهزر معاه بجدعنة، لو قهوة أو أكل سمّي وادعيله، لو تصميم أو شارت علق عليه بذكاء):`;
+
+                        const analysis = await gemini.analyzeImage(bytes.buffer, body.mimeType || 'image/jpeg', prompt);
+                        if (analysis) {
+                            const cleanAnalysis = analysis.replace(/<[^>]+>/g, '').trim();
+                            return new Response(JSON.stringify({ reply: cleanAnalysis }), {
+                                headers: { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Image analysis error:', e);
+                    }
+                }
+
+                if (!text) {
+                    return new Response(JSON.stringify({ error: "Missing text or media" }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+                }
+
                 const result = await brain.handleMessage(userId, name, text, userId, 'web');
                 const replyText = typeof result === 'string' ? result : result.text;
                 const cleanReply = replyText.replace(/<[^>]+>/g, '');
