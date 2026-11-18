@@ -1,4 +1,14 @@
-# 🌌 Cashie Watcher & GameFi Dashboard
+---
+title: Hawas Bot
+emoji: 🤖
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
+# 🌌 Hawas AI — WhatsApp & Web3 Autonomous Companion
 
 A production-grade, FREE-to-run Telegram bot and futuristic Web3 dashboard for the CARV ecosystem on Base.
 
