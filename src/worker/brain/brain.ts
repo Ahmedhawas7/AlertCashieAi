@@ -20,6 +20,7 @@ import { AgentManifesto } from '../agent/manifesto';
 import { LiveNews } from '../intel/liveNews';
 import { IntelFormatter } from '../intel/formatter';
 import { GenderDetector } from '../agent/genderDetector';
+import { YouTubeSearchService } from '../intel/youtube';
 
 /**
  * HawasBrain: The hybrid orchestrator for the Sovereign Agent (v8).
@@ -149,6 +150,17 @@ export class BrainV2 {
             return {
                 intent: 'presence_check',
                 entities: {},
+                planner_ran: true
+            };
+        }
+
+        // 0.7 Music / Song / YouTube Requests: "عايزه اسمع اغنية ويجز", "اغنية الحظ على اليوتيوب"
+        if (/(اغنية|أغنية|اغنيه|أغنيه|أغاني|اغاني|تراك|مهرجان|كليب|يوتيوب|youtube)\b/i.test(t) || /(اسمع|أسمع|شغل|عاوز اسمع|عايز اسمع|عايزه اسمع|نسمع)\b/i.test(t)) {
+            return {
+                intent: 'music_request',
+                need_tools: ['youtube_search'],
+                tool_params: { youtube_search: { query: text } },
+                entities: { topic: text },
                 planner_ran: true
             };
         }
@@ -508,6 +520,41 @@ export class BrainV2 {
             ];
             const joke = jokes[Math.floor(Math.random() * jokes.length)];
             refined = isFemale ? `ضحكتك بالدنيا يا ستي! اسمعي النكتة دي بقى تفرفشك:\n\n${joke}` : `ضحكتك بالدنيا يا بطل! اسمع النكتة دي تفرفشك:\n\n${joke}`;
+        }
+
+        // 2.5 MUSIC & YOUTUBE LINK VERIFICATION & AUTO-FIX (Zero Broken Links)
+        const isMusicPrompt = intent === 'music_request' || /(اغنية|أغنية|اغنيه|أغنيه|أغاني|اغاني|تراك|مهرجان|كليب|يوتيوب|youtube|اسمع|أسمع|شغل|عاوز اسمع|عايز اسمع|عايزه اسمع|نسمع)/i.test(userPrompt);
+        if (isMusicPrompt) {
+            const ytMatch = refined.match(/https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+            let needsRealLink = !ytMatch;
+
+            // If a link was present, verify it actually works
+            if (ytMatch) {
+                const videoId = ytMatch[1];
+                try {
+                    const checkRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+                    if (!checkRes.ok) {
+                        needsRealLink = true; // Video does not exist or is unavailable
+                    }
+                } catch {
+                    // Ignore network issues
+                }
+            }
+
+            if (needsRealLink) {
+                try {
+                    const realVideo = await YouTubeSearchService.search(userPrompt);
+                    if (realVideo) {
+                        if (ytMatch) {
+                            refined = refined.replace(ytMatch[0], realVideo.url);
+                        } else {
+                            refined += `\n\n🎶 اتفضلي الرابط المباشر على يوتيوب:\n${realVideo.url}\n(الأغنية: ${realVideo.title})`;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Auto-fix YouTube search error:', e);
+                }
+            }
         }
 
         // 3. PRESENCE CHECK SAFEGUARD: Prevent unprompted melodrama on simple name calls

@@ -11,6 +11,7 @@ import { TokenAuditor } from '../intel/tokenAuditor';
 import { PaperTradingService } from '../hxfi/paperTrading';
 import { AlertService } from '../intel/alerts';
 import { BaseService, BASE_BUILDER_CODE } from '../base/service';
+import { YouTubeSearchService } from '../intel/youtube';
 
 /**
  * Sovereign Brain Tools Suite
@@ -68,6 +69,12 @@ export class BrainTools {
                 case 'web_search':
                 case 'search':
                     return await this.tool_web_search(params.query || params.topic || params.question);
+
+                case 'youtube_search':
+                case 'music_search':
+                case 'song_search':
+                case 'youtube':
+                    return await this.tool_youtube_search(params.query || params.song || params.topic || params.text);
 
                 case 'url_scrape':
                 case 'scrape':
@@ -554,6 +561,29 @@ export class BrainTools {
             tool: 'daily_diary',
             success: true,
             result: `📖 **مذكراتي اليومية لسه بكتبها النهاردة!**\nكل ليلة قبل ما اليوم يخلص، بقعد مع نفسي أراجع كل كلمة وكل موقف اتعلمته منك، وأسجل الحاجات اللي محتاج أفهمها أكتر وأهدافي لبكرة.. انتظر نسختي الليلة! ✨`
+        };
+    }
+
+    /**
+     * Search YouTube for a song or video and verify its availability
+     */
+    private async tool_youtube_search(query: string): Promise<ToolResult> {
+        if (!query) {
+            return { tool: 'youtube_search', success: false, result: null, error: 'Empty query' };
+        }
+        const video = await YouTubeSearchService.search(query);
+        if (video) {
+            return {
+                tool: 'youtube_search',
+                success: true,
+                result: `🎵 نتيجة البحث الموثقة على يوتيوب:\n• العنوان: ${video.title}\n• القناة/الفنان: ${video.author}\n• الرابط المباشر الشغال 100%: ${video.url}`
+            };
+        }
+        return {
+            tool: 'youtube_search',
+            success: false,
+            result: null,
+            error: 'لم نتمكن من العثور على رابط مباشر شغال لهذه الأغنية على يوتيوب حالياً.'
         };
     }
 }
